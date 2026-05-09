@@ -40,12 +40,12 @@ We audited the full recording and export pipelines. Below are the real memory pr
 
 **When it happens:** Every time a user exports a recording that has audio (which is almost always).
 
-**What goes wrong:** When preparing audio for export, Recordly decodes the full audio track into small chunks, then copies all those chunks into a single final buffer. During the copy step, both the chunks and the final buffer exist in memory at the same time — temporarily doubling the audio memory.
+**What goes wrong:** When preparing audio for export, Recordly decodes the full audio track into small chunks, then copies all those chunks into a single final buffer. During the copy step, both the chunks and the final buffer exist in memory at the same time — temporarily doubling the audio memory. This happens regardless of video resolution since audio size only depends on duration and sample rate.
 
-**Real-world impact:**  
+**Real-world impact (stereo, 48 kHz):**  
 - 5-minute recording: ~55 MB wasted (110 MB peak instead of 55 MB)  
 - 10-minute recording: ~220 MB wasted (440 MB peak instead of 220 MB)  
-- 30-minute recording: ~660 MB wasted (1.3 GB peak instead of 660 MB)
+- **30-minute recording: ~660 MB wasted** (1.3 GB peak instead of 660 MB)
 
 **Where:** `src/lib/exporter/audioEncoder.ts` — the `streamDecodeFromUrl()` method holds `channelChunks[][]` and the final `AudioBuffer` simultaneously.
 
@@ -102,7 +102,7 @@ We audited the full recording and export pipelines. Below are the real memory pr
 
 These canvases stay in memory until JavaScript's garbage collector eventually gets to them, which in Electron can take a long time.
 
-**Real-world impact:** ~16 MB of canvas memory lingers after each 1080p export. At 4K, that's ~64 MB. If a user does multiple exports in a row, this stacks up.
+**Real-world impact:** ~16 MB of canvas memory lingers after each 1080p export. **At 4K, that's ~64 MB.** If a user does multiple exports in a row, this stacks up.
 
 **Where:** `src/lib/exporter/modernFrameRenderer.ts` — the `destroy()` method at line 3336.
 
@@ -114,7 +114,7 @@ These canvases stay in memory until JavaScript's garbage collector eventually ge
 
 **What goes wrong:** The native frame capture module uses a fallback canvas for reading pixel data from the GPU. This canvas is created at the output resolution and stored in a module-level variable — meaning it lives forever once created, even after the export is done and the user goes back to editing.
 
-**Real-world impact:** ~8 MB at 1080p, ~33 MB at 4K, persisting for the rest of the app session.
+**Real-world impact:** ~8 MB at 1080p, **~33 MB at 4K**, persisting for the rest of the app session.
 
 **Where:** `src/lib/exporter/nativeFrameCapture.ts` — module-level `fallbackCanvas` and `fallbackContext`.
 
@@ -150,7 +150,7 @@ These are real but require bigger changes or UX decisions:
 
 ### During Recording
 
-```
+```text
 User hits Record
   └─> Spawn capture process (macOS / Windows / FFmpeg)
   └─> Sample cursor position 30x per second into an array
@@ -162,7 +162,7 @@ Memory grows linearly with recording duration via log buffers and cursor arrays.
 
 ### During Export
 
-```
+```text
 User hits Export
   └─> Decode video frames one-by-one (WebCodecs)
   └─> Render each frame with effects (PixiJS + canvases)
@@ -182,7 +182,7 @@ Peak memory is dominated by: decoded frame buffers, PixiJS GPU context, audio de
 **What:** After copying each channel's decoded chunks into the final AudioBuffer, immediately clear the chunks array so the intermediate data can be garbage collected.
 
 **Files:** `src/lib/exporter/audioEncoder.ts`  
-**Memory saved:** Up to ~220 MB for a 10-minute recording  
+**Memory saved:** ~660 MB for a 30-minute recording (resolution-independent)  
 **Risk:** Low — the chunks are never read again after being copied
 
 ---
@@ -192,7 +192,7 @@ Peak memory is dominated by: decoded frame buffers, PixiJS GPU context, audio de
 **What:** Add a constant `MAX_CAPTURE_OUTPUT_BUFFER_LENGTH = 256 KB`. After each log append, if the buffer exceeds this limit, trim it to keep only the most recent 128 KB. We keep the tail because the most recent output is the most useful for debugging.
 
 **Files:** `electron/ipc/constants.ts`, `electron/ipc/register/recording.ts`  
-**Memory saved:** Up to several MB per long recording  
+**Memory saved:** ~10 MB for a 30-minute recording  
 **Risk:** Very low — old log lines are only used for error diagnostics and are rarely needed
 
 ---
@@ -202,7 +202,7 @@ Peak memory is dominated by: decoded frame buffers, PixiJS GPU context, audio de
 **What:** Same approach as Fix 2, applied to the FFmpeg stderr string during native export.
 
 **Files:** `electron/ipc/register/export.ts`  
-**Memory saved:** Up to several MB per long export  
+**Memory saved:** ~3 MB for a 30-minute 4K export  
 **Risk:** Very low
 
 ---
@@ -212,7 +212,7 @@ Peak memory is dominated by: decoded frame buffers, PixiJS GPU context, audio de
 **What:** After copying active cursor samples into the pending array, set `activeCursorSamples.length = 0`. New samples will continue accumulating from scratch. The next snapshot merges only the new ones.
 
 **Files:** `electron/ipc/cursor/telemetry.ts`  
-**Memory saved:** ~10 MB for a 30-minute recording  
+**Memory saved:** ~10 MB for a 30-minute recording (resolution-independent)  
 **Risk:** Low — verified that `activeCursorSamples` is only used for pushing new samples and for snapshotting, and is already cleared on recording stop
 
 ---
@@ -222,7 +222,7 @@ Peak memory is dominated by: decoded frame buffers, PixiJS GPU context, audio de
 **What:** Add `this.backgroundVideoFrameStagingCanvas = null`, `this.backgroundVideoFrameStagingCtx = null`, `this.compositeCanvas = null`, and `this.compositeCtx = null` to the `destroy()` method.
 
 **Files:** `src/lib/exporter/modernFrameRenderer.ts`  
-**Memory saved:** ~16 MB per 1080p export, ~64 MB at 4K  
+**Memory saved:** ~64 MB for a 4K export  
 **Risk:** Very low — these are simple null assignments following the same pattern as the 20+ other canvas cleanups already in `destroy()`
 
 ---
@@ -232,7 +232,7 @@ Peak memory is dominated by: decoded frame buffers, PixiJS GPU context, audio de
 **What:** Add a `releaseNativeFrameCaptureResources()` function that nulls the module-level canvas and context. Call it from the exporter's cleanup method after each export.
 
 **Files:** `src/lib/exporter/nativeFrameCapture.ts`, `src/lib/exporter/modernVideoExporter.ts`  
-**Memory saved:** ~8 MB at 1080p, ~33 MB at 4K  
+**Memory saved:** ~33 MB for a 4K export  
 **Risk:** Very low — the canvas is lazily recreated on next use if needed
 
 ---
@@ -244,24 +244,28 @@ Peak memory is dominated by: decoded frame buffers, PixiJS GPU context, audio de
 - `webcodecs-conservative`: pending frames 20 → 12, decode queue 8 → 6
 
 **Files:** `src/lib/exporter/exportTuning.ts`  
-**Memory saved:** ~130 MB at 4K on a 4-core machine  
+**Memory saved:** ~132 MB for a 4K export on a 4-core machine (4 fewer pending frames × ~33 MB each)  
 **Risk:** Low-medium — export may be slightly slower on edge-case hardware due to less pipeline buffering, but avoids the much worse scenario of the OS swapping to disk under memory pressure
 
 ---
 
 ## 7. Summary
 
+All figures below are for the same reference scenario: **30-minute recording, 4K export, 4-core machine.**
+
 | Fix | Addresses | Memory Saved | Risk |
 |-----|-----------|-------------|------|
-| 1. Release audio chunks early | Audio decode doubling | Up to ~220 MB | Low |
-| 2. Cap recording log buffers | Unbounded log strings | Several MB | Very low |
-| 3. Cap FFmpeg export stderr | Unbounded FFmpeg logs | Several MB | Very low |
+| 1. Release audio chunks early | Audio decode doubling | ~660 MB | Low |
+| 2. Cap recording log buffers | Unbounded log strings | ~10 MB | Very low |
+| 3. Cap FFmpeg export stderr | Unbounded FFmpeg logs | ~3 MB | Very low |
 | 4. Clear cursor samples after snapshot | Duplicate cursor data | ~10 MB | Low |
-| 5. Null missed canvas refs | Canvas leak in destroy() | ~16-64 MB | Very low |
-| 6. Release fallback canvas | Persistent singleton | ~8-33 MB | Very low |
-| 7. Lower decode buffer limits | Excessive buffering | ~130 MB at 4K | Low-medium |
+| 5. Null missed canvas refs | Canvas leak in destroy() | ~64 MB | Very low |
+| 6. Release fallback canvas | Persistent singleton | ~33 MB | Very low |
+| 7. Lower decode buffer limits | Excessive buffering | ~132 MB | Low-medium |
 
-**Combined worst-case savings:** ~400+ MB for a 30-minute 4K recording + export on a 4-core machine.
+**Combined savings for this scenario: ~912 MB.**
+
+Note: Fixes 2 and 4 reduce memory in the main process (during recording), while fixes 1, 3, 5, 6, and 7 reduce memory in the renderer process (during export). The combined figure is the total across both processes for a record-then-export workflow.
 
 ---
 
