@@ -3449,6 +3449,10 @@ export class FrameRenderer {
 		this.sceneVideoFrameStagingCtx = null;
 		this.webcamVideoFrameStagingCanvas = null;
 		this.webcamVideoFrameStagingCtx = null;
+		this.backgroundVideoFrameStagingCanvas = null;
+		this.backgroundVideoFrameStagingCtx = null;
+		this.compositeCanvas = null;
+		this.compositeCtx = null;
 		this.videoTextureUsesStartupStaging = false;
 		this.webcamTextureUsesStartupStaging = false;
 

@@ -33,6 +33,7 @@ import {
 } from "./finalizationTimeout";
 import { getLocalFilePath } from "./localMediaSource";
 import { FrameRenderer as ModernFrameRenderer } from "./modernFrameRenderer";
+import { releaseNativeFrameCaptureResources } from "./nativeFrameCapture";
 import {
 	getOrderedSupportedMp4EncoderCandidates,
 	type SupportedMp4EncoderPath,
@@ -1786,6 +1787,7 @@ export class ModernVideoExporter {
 		this.muxer = null;
 		this.audioProcessor?.cancel();
 		this.audioProcessor = null;
+		releaseNativeFrameCaptureResources();
 		this.disposeNativeH264Encoder();
 		const nativeExportSessionId = this.nativeExportSessionId;
 		this.nativeExportSessionId = null;

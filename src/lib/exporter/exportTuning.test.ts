@@ -72,12 +72,12 @@ describe("exportTuning", () => {
 		});
 
 		expect(breezeLowCoreProfile.name).toBe("breeze-conservative");
-		expect(breezeLowCoreProfile.maxDecodeQueue).toBe(6);
-		expect(breezeLowCoreProfile.maxPendingFrames).toBe(12);
+		expect(breezeLowCoreProfile.maxDecodeQueue).toBe(4);
+		expect(breezeLowCoreProfile.maxPendingFrames).toBe(8);
 		expect(breezeLowCoreProfile.maxInFlightNativeWrites).toBe(1);
 
 		expect(breezeHeavyProfile.name).toBe("breeze-conservative");
-		expect(breezeHeavyProfile.maxDecodeQueue).toBe(6);
-		expect(breezeHeavyProfile.maxPendingFrames).toBe(12);
+		expect(breezeHeavyProfile.maxDecodeQueue).toBe(4);
+		expect(breezeHeavyProfile.maxPendingFrames).toBe(8);
 	});
 });

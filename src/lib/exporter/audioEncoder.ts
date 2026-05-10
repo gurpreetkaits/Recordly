@@ -1042,6 +1042,7 @@ export class AudioProcessor {
 					channelData.set(chunk, writeOffset);
 					writeOffset += chunk.length;
 				}
+				channelChunks[ch].length = 0;
 			}
 
 			return audioBuffer;

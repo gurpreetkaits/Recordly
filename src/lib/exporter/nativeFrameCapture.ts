@@ -72,6 +72,11 @@ function flipRgbaRowsInPlace(buffer: Uint8Array, width: number, height: number):
 	}
 }
 
+export function releaseNativeFrameCaptureResources(): void {
+	fallbackCanvas = null;
+	fallbackContext = null;
+}
+
 export async function captureCanvasFrameForNativeExport(
 	canvas: HTMLCanvasElement,
 	timestamp: number,

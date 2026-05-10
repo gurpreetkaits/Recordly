@@ -269,14 +269,16 @@ export function snapshotCursorTelemetryForPersistence() {
 
 	if (pendingCursorSamples.length === 0) {
 		setPendingCursorSamples([...activeCursorSamples]);
-		return;
+	} else {
+		const lastPendingTimeMs =
+			pendingCursorSamples[pendingCursorSamples.length - 1]?.timeMs ?? -1;
+		setPendingCursorSamples([
+			...pendingCursorSamples,
+			...activeCursorSamples.filter((sample) => sample.timeMs > lastPendingTimeMs),
+		]);
 	}
 
-	const lastPendingTimeMs = pendingCursorSamples[pendingCursorSamples.length - 1]?.timeMs ?? -1;
-	setPendingCursorSamples([
-		...pendingCursorSamples,
-		...activeCursorSamples.filter((sample) => sample.timeMs > lastPendingTimeMs),
-	]);
+	activeCursorSamples.length = 0;
 }
 
 export function startCursorSampling() {

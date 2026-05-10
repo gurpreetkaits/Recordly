@@ -37,6 +37,10 @@ import {
 	type NativeExportEncodingMode,
 	type NativeVideoExportFinishOptions,
 } from "../nativeVideoExport";
+import {
+	MAX_CAPTURE_OUTPUT_BUFFER_LENGTH,
+	CAPTURE_OUTPUT_BUFFER_TRIM_TARGET,
+} from "../constants";
 import { approveUserPath } from "../utils";
 
 async function moveExportedTempFile(tempPath: string, destinationPath: string) {
@@ -192,6 +196,11 @@ export function registerExportHandlers() {
 
 				ffmpegProcess.stderr.on("data", (chunk: Buffer) => {
 					session.stderrOutput += chunk.toString();
+					if (session.stderrOutput.length > MAX_CAPTURE_OUTPUT_BUFFER_LENGTH) {
+						session.stderrOutput = session.stderrOutput.slice(
+							session.stderrOutput.length - CAPTURE_OUTPUT_BUFFER_TRIM_TARGET,
+						);
+					}
 				});
 
 				nativeVideoExportSessions.set(sessionId, session);

@@ -130,8 +130,8 @@ export function getExportBackpressureProfile(
 			return {
 				name: "breeze-conservative",
 				maxEncodeQueue,
-				maxDecodeQueue: 6,
-				maxPendingFrames: 12,
+				maxDecodeQueue: 4,
+				maxPendingFrames: 8,
 				maxInFlightNativeWrites: 1,
 			};
 		}
@@ -159,8 +159,8 @@ export function getExportBackpressureProfile(
 		return {
 			name: "webcodecs-conservative",
 			maxEncodeQueue,
-			maxDecodeQueue: 8,
-			maxPendingFrames: 20,
+			maxDecodeQueue: 6,
+			maxPendingFrames: 12,
 			maxInFlightNativeWrites: 1,
 		};
 	}

@@ -9,6 +9,17 @@ import type {
 	SystemCursorAsset,
 	WindowBounds,
 } from "./types";
+import {
+	MAX_CAPTURE_OUTPUT_BUFFER_LENGTH,
+	CAPTURE_OUTPUT_BUFFER_TRIM_TARGET,
+} from "./constants";
+
+function trimCaptureOutputBuffer(buffer: string): string {
+	if (buffer.length <= MAX_CAPTURE_OUTPUT_BUFFER_LENGTH) {
+		return buffer;
+	}
+	return buffer.slice(buffer.length - CAPTURE_OUTPUT_BUFFER_TRIM_TARGET);
+}
 
 // ── Source selection ──────────────────────────────────────────────────────────
 export let selectedSource: SelectedSource | null = null;
@@ -129,7 +140,7 @@ export function setNativeCaptureProcess(v: ChildProcessWithoutNullStreams | null
 	nativeCaptureProcess = v;
 }
 export function setNativeCaptureOutputBuffer(v: string) {
-	nativeCaptureOutputBuffer = v;
+	nativeCaptureOutputBuffer = trimCaptureOutputBuffer(v);
 }
 export function setNativeCaptureTargetPath(v: string | null) {
 	nativeCaptureTargetPath = v;
@@ -158,7 +169,7 @@ export function setWindowsCaptureProcess(v: ChildProcessWithoutNullStreams | nul
 	windowsCaptureProcess = v;
 }
 export function setWindowsCaptureOutputBuffer(v: string) {
-	windowsCaptureOutputBuffer = v;
+	windowsCaptureOutputBuffer = trimCaptureOutputBuffer(v);
 }
 export function setWindowsCaptureTargetPath(v: string | null) {
 	windowsCaptureTargetPath = v;
@@ -196,7 +207,7 @@ export function setFfmpegCaptureProcess(v: ChildProcessWithoutNullStreams | null
 	ffmpegCaptureProcess = v;
 }
 export function setFfmpegCaptureOutputBuffer(v: string) {
-	ffmpegCaptureOutputBuffer = v;
+	ffmpegCaptureOutputBuffer = trimCaptureOutputBuffer(v);
 }
 export function setFfmpegCaptureTargetPath(v: string | null) {
 	ffmpegCaptureTargetPath = v;
