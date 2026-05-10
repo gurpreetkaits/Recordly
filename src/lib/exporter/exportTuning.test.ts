@@ -50,9 +50,9 @@ describe("exportTuning", () => {
 		expect(webCodecsProfile.maxDecodeQueue).toBe(12);
 		expect(webCodecsProfile.maxPendingFrames).toBe(32);
 		expect(breezeProfile.name).toBe("breeze-balanced-plus");
-		expect(breezeProfile.maxDecodeQueue).toBe(10);
-		expect(breezeProfile.maxPendingFrames).toBe(24);
-		expect(breezeProfile.maxInFlightNativeWrites).toBe(4);
+		expect(breezeProfile.maxDecodeQueue).toBe(14);
+		expect(breezeProfile.maxPendingFrames).toBe(40);
+		expect(breezeProfile.maxInFlightNativeWrites).toBe(8);
 	});
 
 	it("falls back to conservative native settings on low-core or very heavy workloads", () => {

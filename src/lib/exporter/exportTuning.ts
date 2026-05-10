@@ -140,18 +140,18 @@ export function getExportBackpressureProfile(
 			return {
 				name: "breeze-balanced-plus",
 				maxEncodeQueue,
-				maxDecodeQueue: 10,
-				maxPendingFrames: 24,
-				maxInFlightNativeWrites: 4,
+				maxDecodeQueue: 14,
+				maxPendingFrames: 40,
+				maxInFlightNativeWrites: 8,
 			};
 		}
 
 		return {
 			name: "breeze-balanced",
 			maxEncodeQueue,
-			maxDecodeQueue: 8,
-			maxPendingFrames: 16,
-			maxInFlightNativeWrites: 2,
+			maxDecodeQueue: 12,
+			maxPendingFrames: 28,
+			maxInFlightNativeWrites: 4,
 		};
 	}
 

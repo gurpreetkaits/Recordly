@@ -3,16 +3,20 @@ import type {
 	AudioRegion,
 	AutoCaptionSettings,
 	CaptionCue,
+	ClipRegion,
 	CropRegion,
 	CursorStyle,
 	CursorTelemetryPoint,
 	Padding,
 	SpeedRegion,
+	SourceAudioTrackSettings,
 	TrimRegion,
 	WebcamOverlaySettings,
+	ZoomMotionBlurTuning,
 	ZoomRegion,
 	ZoomTransitionEasing,
 } from "@/components/video-editor/types";
+import { getEffectiveVideoStreamDurationSeconds } from "@/lib/mediaTiming";
 import { AudioProcessor, isAacAudioEncodingSupported } from "./audioEncoder";
 import { buildEditedTrackSourceSegments, classifyEditedTrackStrategy } from "./editedTrackStrategy";
 import {
@@ -48,6 +52,7 @@ interface VideoExporterConfig extends ExportConfig {
 	shadowIntensity: number;
 	backgroundBlur: number;
 	zoomMotionBlur?: number;
+	zoomMotionBlurTuning?: ZoomMotionBlurTuning;
 	zoomTemporalMotionBlur?: number;
 	zoomMotionBlurSampleCount?: number | null;
 	zoomMotionBlurShutterFraction?: number | null;
@@ -77,6 +82,9 @@ interface VideoExporterConfig extends ExportConfig {
 	cursorSpringStiffnessMultiplier?: number;
 	cursorSpringDampingMultiplier?: number;
 	cursorSpringMassMultiplier?: number;
+	cameraSpringStiffnessMultiplier?: number;
+	cameraSpringDampingMultiplier?: number;
+	cameraSpringMassMultiplier?: number;
 	cursorMotionBlur?: number;
 	cursorClickBounce?: number;
 	cursorClickBounceDuration?: number;
@@ -84,8 +92,10 @@ interface VideoExporterConfig extends ExportConfig {
 	zoomSmoothness?: number;
 	frame?: string | null;
 	audioRegions?: AudioRegion[];
+	clipRegions?: ClipRegion[];
 	sourceAudioFallbackPaths?: string[];
 	sourceAudioFallbackStartDelayMsByPath?: Record<string, number>;
+	sourceAudioTrackSettings?: SourceAudioTrackSettings;
 	previewWidth?: number;
 	previewHeight?: number;
 	onProgress?: (progress: ExportProgress) => void;
@@ -112,6 +122,18 @@ type NativeAudioPlan =
 			audioSourceSampleRate: number;
 			editedTrackSegments: Array<{ startMs: number; endMs: number; speed: number }>;
 	  };
+
+const FILTERGRAPH_FALLBACK_AUDIO_SAMPLE_RATE = 48_000;
+
+function hasNonDefaultSourceTrackSettings(sourceAudioTrackSettings?: SourceAudioTrackSettings) {
+	if (!sourceAudioTrackSettings) {
+		return false;
+	}
+	return Object.values(sourceAudioTrackSettings).some(
+		(settings) =>
+			Math.abs((settings?.volume ?? 1) - 1) > 0.0005 || Boolean(settings?.normalize),
+	);
+}
 
 export class VideoExporter {
 	private config: VideoExporterConfig;
@@ -178,10 +200,13 @@ export class VideoExporter {
 			let useNativeEncoder = shouldUseExperimentalNativeExport
 				? await this.tryStartNativeVideoExport()
 				: false;
+			const shouldUsePitchPreservingFfmpegAudio =
+				audioPlan.audioMode === "edited-track" &&
+				audioPlan.strategy === "filtergraph-fast-path";
 			const shouldUseFfmpegAudioFallback =
 				!useNativeEncoder &&
 				audioPlan.audioMode !== "none" &&
-				!(await isAacAudioEncodingSupported());
+				(shouldUsePitchPreservingFfmpegAudio || !(await isAacAudioEncodingSupported()));
 
 			if (!useNativeEncoder) {
 				await this.initializeEncoder();
@@ -198,6 +223,7 @@ export class VideoExporter {
 				shadowIntensity: this.config.shadowIntensity,
 				backgroundBlur: this.config.backgroundBlur,
 				zoomMotionBlur: this.config.zoomMotionBlur,
+				zoomMotionBlurTuning: this.config.zoomMotionBlurTuning,
 				zoomTemporalMotionBlur: this.config.zoomTemporalMotionBlur,
 				zoomMotionBlurSampleCount: this.config.zoomMotionBlurSampleCount,
 				zoomMotionBlurShutterFraction: this.config.zoomMotionBlurShutterFraction,
@@ -231,6 +257,9 @@ export class VideoExporter {
 				cursorSpringStiffnessMultiplier: this.config.cursorSpringStiffnessMultiplier,
 				cursorSpringDampingMultiplier: this.config.cursorSpringDampingMultiplier,
 				cursorSpringMassMultiplier: this.config.cursorSpringMassMultiplier,
+				cameraSpringStiffnessMultiplier: this.config.cameraSpringStiffnessMultiplier,
+				cameraSpringDampingMultiplier: this.config.cameraSpringDampingMultiplier,
+				cameraSpringMassMultiplier: this.config.cameraSpringMassMultiplier,
 				cursorMotionBlur: this.config.cursorMotionBlur,
 				cursorClickBounce: this.config.cursorClickBounce,
 				cursorClickBounceDuration: this.config.cursorClickBounceDuration,
@@ -275,7 +304,6 @@ export class VideoExporter {
 				this.config.speedRegions,
 				async (videoFrame, _exportTimestampUs, sourceTimestampMs, cursorTimestampMs) => {
 					if (this.cancelled) {
-						videoFrame.close();
 						return;
 					}
 
@@ -289,7 +317,6 @@ export class VideoExporter {
 						frameDuration,
 						timestamp,
 					);
-					videoFrame.close();
 
 					if (useNativeEncoder) {
 						await this.encodeRenderedFrameNative(timestamp, frameDuration, frameIndex);
@@ -385,6 +412,7 @@ export class VideoExporter {
 								this.config.audioRegions,
 								this.config.sourceAudioFallbackPaths,
 								this.config.sourceAudioFallbackStartDelayMsByPath,
+								this.config.sourceAudioTrackSettings,
 							),
 							"audio processing",
 							"audio",
@@ -406,7 +434,9 @@ export class VideoExporter {
 
 			if (shouldUseFfmpegAudioFallback) {
 				console.warn(
-					"[VideoExporter] Browser AAC encoding is unavailable; falling back to FFmpeg audio muxing.",
+					shouldUsePitchPreservingFfmpegAudio
+						? "[VideoExporter] Using FFmpeg audio muxing for pitch-preserving speed edits."
+						: "[VideoExporter] Browser AAC encoding is unavailable; falling back to FFmpeg audio muxing.",
 				);
 				const result = await this.finalizeExportWithFfmpegAudio(
 					muxerResult,
@@ -527,6 +557,11 @@ export class VideoExporter {
 			(videoInfo.hasAudio ? localVideoSourcePath : null) ??
 			sourceAudioFallbackPaths[0] ??
 			null;
+		const usesEmbeddedPrimaryAudio =
+			Boolean(videoInfo.hasAudio) && primaryAudioSourcePath === localVideoSourcePath;
+		const primaryAudioSourceSampleRate = usesEmbeddedPrimaryAudio
+			? videoInfo.audioSampleRate
+			: FILTERGRAPH_FALLBACK_AUDIO_SAMPLE_RATE;
 
 		if (
 			!videoInfo.hasAudio &&
@@ -540,33 +575,42 @@ export class VideoExporter {
 			speedRegions.length > 0 ||
 			audioRegions.length > 0 ||
 			sourceAudioFallbackPaths.length > 1 ||
-			hasTimedSourceAudioFallback
+			hasTimedSourceAudioFallback ||
+			hasNonDefaultSourceTrackSettings(this.config.sourceAudioTrackSettings) ||
+			(this.config.clipRegions ?? []).some((clip) => Boolean(clip.muted))
 		) {
 			const sourceDurationMs = Math.max(
 				0,
-				Math.round((videoInfo.streamDuration ?? videoInfo.duration) * 1000),
+				Math.round(
+					getEffectiveVideoStreamDurationSeconds({
+						duration: videoInfo.duration,
+						streamDuration: videoInfo.streamDuration,
+					}) * 1000,
+				),
 			);
 			const trimRegions = this.config.trimRegions ?? [];
-			const strategy =
-				videoInfo.hasAudio &&
-				localVideoSourcePath &&
-				sourceAudioFallbackPaths.length === 0 &&
-				typeof videoInfo.audioSampleRate === "number" &&
-				Number.isFinite(videoInfo.audioSampleRate) &&
-				videoInfo.audioSampleRate > 0
-					? classifyEditedTrackStrategy({
-							primaryAudioSourcePath,
-							sourceDurationMs,
-							trimRegions,
-							speedRegions,
-							audioRegions,
-							sourceAudioFallbackPaths,
-						})
-					: "offline-render-fallback";
+			const canUsePrimaryAudioFiltergraph =
+				Boolean(primaryAudioSourcePath) &&
+				!hasTimedSourceAudioFallback &&
+				(usesEmbeddedPrimaryAudio ||
+					sourceAudioFallbackPaths.includes(primaryAudioSourcePath ?? "")) &&
+				typeof primaryAudioSourceSampleRate === "number" &&
+				Number.isFinite(primaryAudioSourceSampleRate) &&
+				primaryAudioSourceSampleRate > 0;
+			const strategy = canUsePrimaryAudioFiltergraph
+				? classifyEditedTrackStrategy({
+						primaryAudioSourcePath,
+						sourceDurationMs,
+						trimRegions,
+						speedRegions,
+						audioRegions,
+						sourceAudioFallbackPaths,
+					})
+				: "offline-render-fallback";
 
 			if (strategy === "filtergraph-fast-path") {
-				const audioSourcePath = localVideoSourcePath;
-				const audioSourceSampleRate = videoInfo.audioSampleRate;
+				const audioSourcePath = primaryAudioSourcePath;
+				const audioSourceSampleRate = primaryAudioSourceSampleRate;
 				const editedTrackSegments = buildEditedTrackSourceSegments(
 					sourceDurationMs,
 					trimRegions,
@@ -603,7 +647,12 @@ export class VideoExporter {
 		if ((this.config.trimRegions ?? []).length > 0) {
 			const sourceDurationMs = Math.max(
 				0,
-				Math.round((videoInfo.streamDuration ?? videoInfo.duration) * 1000),
+				Math.round(
+					getEffectiveVideoStreamDurationSeconds({
+						duration: videoInfo.duration,
+						streamDuration: videoInfo.streamDuration,
+					}) * 1000,
+				),
 			);
 			const trimSegments = this.buildNativeTrimSegments(sourceDurationMs);
 			if (trimSegments.length === 0) {
@@ -815,6 +864,8 @@ export class VideoExporter {
 						this.config.audioRegions,
 						this.config.sourceAudioFallbackPaths,
 						this.config.sourceAudioFallbackStartDelayMsByPath,
+						this.config.sourceAudioTrackSettings,
+						this.config.clipRegions,
 					),
 					"native edited audio rendering",
 					"audio",
@@ -911,6 +962,8 @@ export class VideoExporter {
 						this.config.audioRegions,
 						this.config.sourceAudioFallbackPaths,
 						this.config.sourceAudioFallbackStartDelayMsByPath,
+						this.config.sourceAudioTrackSettings,
+						this.config.clipRegions,
 					),
 					"ffmpeg edited audio rendering",
 					"audio",
@@ -944,6 +997,7 @@ export class VideoExporter {
 				audioPlan.strategy === "filtergraph-fast-path"
 					? audioPlan.audioSourceSampleRate
 					: undefined,
+			outputDurationSec: this.effectiveDurationSec,
 			editedAudioData: editedAudioBuffer,
 			editedAudioMimeType,
 		};

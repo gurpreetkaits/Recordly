@@ -29,10 +29,6 @@ import {
 import {
 	TEMPORAL_MOTION_BLUR_DEFAULT_SAMPLE_COUNT,
 	TEMPORAL_MOTION_BLUR_DEFAULT_SHUTTER_FRACTION,
-	TEMPORAL_MOTION_BLUR_MAX_SAMPLE_COUNT,
-	TEMPORAL_MOTION_BLUR_MAX_SHUTTER_FRACTION,
-	TEMPORAL_MOTION_BLUR_MIN_SAMPLE_COUNT,
-	TEMPORAL_MOTION_BLUR_MIN_SHUTTER_FRACTION,
 } from "@/lib/exporter/temporalMotionBlur";
 import type { ExtensionSettingField } from "@/lib/extensions";
 import { extensionHost, type FrameInstance } from "@/lib/extensions";
@@ -44,12 +40,16 @@ import {
 	isVideoWallpaperSource,
 } from "@/lib/wallpapers";
 import { type AspectRatio } from "@/utils/aspectRatioUtils";
-import minimalCursorUrl from "../../../Minimal Cursor.svg";
+import minimalCursorUrl from "@/assets/cursors/custom/minimal-cursor.svg";
 import { useI18n, useScopedT } from "../../contexts/I18nContext";
 import type { AppLocale } from "../../i18n/config";
 import { SUPPORTED_LOCALES } from "../../i18n/config";
 import { AnnotationSettingsPanel } from "./AnnotationSettingsPanel";
-import { CURSOR_MOTION_PRESETS, type CursorMotionPresetId } from "./cursorMotionPresets";
+import {
+	CURSOR_MOTION_PRESETS,
+	type CursorMotionPresetId,
+	getMatchingCursorMotionPresetId,
+} from "./cursorMotionPresets";
 import { loadEditorPreferences, saveEditorPreferences } from "./editorPreferences";
 import { SliderControl } from "./SliderControl";
 import { KeyboardShortcutsDialog } from "./TutorialHelp";
@@ -68,6 +68,7 @@ import type {
 	WebcamPositionPreset,
 	ZoomDepth,
 	ZoomMode,
+	ZoomMotionBlurTuning,
 	ZoomTransitionEasing,
 } from "./types";
 import {
@@ -89,6 +90,7 @@ import {
 	DEFAULT_WEBCAM_SHADOW,
 	DEFAULT_WEBCAM_SIZE,
 	DEFAULT_ZOOM_IN_DURATION_MS,
+	DEFAULT_ZOOM_MOTION_BLUR_TUNING,
 	DEFAULT_ZOOM_OUT_DURATION_MS,
 } from "./types";
 import { fromCursorSwaySliderValue, toCursorSwaySliderValue } from "./videoPlayback/cursorSway";
@@ -107,6 +109,15 @@ import {
 const tahoeCursorUrl = cursorSetAssets.tahoe.arrow.url;
 const BUILTIN_CURSOR_PREVIEW_SIZE = 28;
 const BUILTIN_CURSOR_PREVIEW_FRAME_SIZE = 48;
+
+function getStepPrecision(step: number): number {
+	if (!Number.isFinite(step) || step <= 0) return 0;
+	const [mantissa = "0", exponentPart = "0"] = step.toExponential().split("e");
+	const exponent = Number.parseInt(exponentPart, 10);
+	const mantissaDecimals = (mantissa.split(".")[1] ?? "").replace(/0+$/, "").length;
+	const precision = exponent < 0 ? Math.max(0, -exponent + mantissaDecimals) : mantissaDecimals;
+	return Math.min(12, precision);
+}
 
 const GRADIENTS = [
 	"linear-gradient( 111.6deg,  rgba(114,167,232,1) 9.4%, rgba(253,129,82,1) 43.9%, rgba(253,129,82,1) 54.8%, rgba(249,202,86,1) 86.3% )",
@@ -260,42 +271,24 @@ function ExtensionSettingsSection({
 				}
 
 				if (field.type === "slider") {
+					const step = field.step ?? 0.01;
+					const precision = getStepPrecision(step);
 					return (
-						<div
-							key={field.id}
-							className="flex items-center justify-between gap-2 rounded-lg bg-foreground/[0.03] px-2.5 py-1.5"
-						>
-							<span className="text-[11px] text-muted-foreground flex-shrink-0">
-								{field.label}
-							</span>
-							<div className="flex items-center gap-1.5">
-								<input
-									type="range"
-									min={field.min ?? 0}
-									max={field.max ?? 1}
-									step={field.step ?? 0.01}
-									value={
-										typeof value === "number"
-											? value
-											: (field.defaultValue as number)
-									}
-									onChange={(e) => {
-										extensionHost.setExtensionSetting(
-											extensionId,
-											field.id,
-											parseFloat(e.target.value),
-										);
-										forceUpdate((n) => n + 1);
-									}}
-									className="w-20 h-1 accent-[#2563EB]"
-								/>
-								<span className="text-[10px] text-muted-foreground/70 w-8 text-right font-mono">
-									{(typeof value === "number"
-										? value
-										: (field.defaultValue as number)
-									).toFixed(1)}
-								</span>
-							</div>
+						<div key={field.id} className="mt-1">
+							<SliderControl
+								label={field.label}
+								value={typeof value === "number" ? value : (field.defaultValue as number)}
+								defaultValue={field.defaultValue as number}
+								min={field.min ?? 0}
+								max={field.max ?? 1}
+								step={step}
+								onChange={(v) => {
+									extensionHost.setExtensionSetting(extensionId, field.id, v);
+									forceUpdate((n) => n + 1);
+								}}
+								formatValue={(v) => v.toFixed(precision)}
+								parseInput={(text) => parseFloat(text)}
+							/>
 						</div>
 					);
 				}
@@ -467,17 +460,28 @@ interface SettingsPanelProps {
 	selectedClipId?: string | null;
 	selectedClipSpeed?: number | null;
 	selectedClipMuted?: boolean | null;
+	selectedClipShowSourceAudio?: boolean | null;
+	hasClipSourceAudio?: boolean;
 	onClipSpeedChange?: (speed: number) => void;
 	onClipMutedChange?: (muted: boolean) => void;
+	onClipShowSourceAudioChange?: (show: boolean) => void;
+	sourceAudioTrackMeta?: Array<{ id: string; label: string }>;
+	sourceAudioTrackSettings?: Record<string, { volume: number; normalize: boolean }>;
+	onSourceAudioTrackVolumeChange?: (id: string, volume: number) => void;
+	onSourceAudioTrackNormalizeChange?: (id: string, normalize: boolean) => void;
 	onClipDelete?: (id: string) => void;
 	selectedAudioId?: string | null;
 	selectedAudioVolume?: number | null;
+	selectedAudioNormalize?: boolean | null;
 	onAudioVolumeChange?: (volume: number) => void;
+	onAudioNormalizeChange?: (normalize: boolean) => void;
 	onAudioDelete?: (id: string) => void;
 	shadowIntensity?: number;
 	onShadowChange?: (intensity: number) => void;
 	backgroundBlur?: number;
 	onBackgroundBlurChange?: (amount: number) => void;
+	zoomMotionBlurTuning?: ZoomMotionBlurTuning;
+	onZoomMotionBlurTuningChange?: (tuning: ZoomMotionBlurTuning) => void;
 	zoomTemporalMotionBlur?: number;
 	onZoomTemporalMotionBlurChange?: (amount: number) => void;
 	zoomMotionBlurSampleCount?: number | null;
@@ -520,6 +524,12 @@ interface SettingsPanelProps {
 	onCursorSpringDampingMultiplierChange?: (multiplier: number) => void;
 	cursorSpringMassMultiplier?: number;
 	onCursorSpringMassMultiplierChange?: (multiplier: number) => void;
+	cameraSpringStiffnessMultiplier?: number;
+	onCameraSpringStiffnessMultiplierChange?: (multiplier: number) => void;
+	cameraSpringDampingMultiplier?: number;
+	onCameraSpringDampingMultiplierChange?: (multiplier: number) => void;
+	cameraSpringMassMultiplier?: number;
+	onCameraSpringMassMultiplierChange?: (multiplier: number) => void;
 	zoomClassicMode?: boolean;
 	onZoomClassicModeChange?: (enabled: boolean) => void;
 	cursorMotionBlur?: number;
@@ -570,6 +580,8 @@ interface SettingsPanelProps {
 	onClearAutoCaptions?: () => void;
 	onDownloadWhisperSmallModel?: () => void;
 	onDeleteWhisperSmallModel?: () => void;
+	nativeCaptureUnavailableSession?: boolean;
+	onOpenNativeCaptureUnavailableModal?: () => void;
 }
 
 const ZOOM_DEPTH_OPTIONS: Array<{ depth: ZoomDepth; label: string }> = [
@@ -850,23 +862,28 @@ export function SettingsPanel({
 	selectedClipId,
 	selectedClipSpeed,
 	selectedClipMuted,
+	selectedClipShowSourceAudio = false,
+	hasClipSourceAudio = false,
 	onClipSpeedChange,
 	onClipMutedChange,
+	onClipShowSourceAudioChange,
+	sourceAudioTrackMeta = [],
+	sourceAudioTrackSettings = {},
+	onSourceAudioTrackVolumeChange,
+	onSourceAudioTrackNormalizeChange,
 	onClipDelete,
 	selectedAudioId,
 	selectedAudioVolume,
+	selectedAudioNormalize,
 	onAudioVolumeChange,
+	onAudioNormalizeChange,
 	onAudioDelete,
 	shadowIntensity = 0.67,
 	onShadowChange,
 	backgroundBlur = 0,
 	onBackgroundBlurChange,
-	zoomTemporalMotionBlur = 0,
-	onZoomTemporalMotionBlurChange,
-	zoomMotionBlurSampleCount = TEMPORAL_MOTION_BLUR_DEFAULT_SAMPLE_COUNT,
-	onZoomMotionBlurSampleCountChange,
-	zoomMotionBlurShutterFraction = TEMPORAL_MOTION_BLUR_DEFAULT_SHUTTER_FRACTION,
-	onZoomMotionBlurShutterFractionChange,
+	zoomMotionBlurTuning = DEFAULT_ZOOM_MOTION_BLUR_TUNING,
+	onZoomMotionBlurTuningChange,
 	connectZooms = true,
 	onConnectZoomsChange,
 	autoApplyFreshRecordingAutoZooms = true,
@@ -891,6 +908,12 @@ export function SettingsPanel({
 	onCursorSpringDampingMultiplierChange,
 	cursorSpringMassMultiplier = 1,
 	onCursorSpringMassMultiplierChange,
+	cameraSpringStiffnessMultiplier = 1,
+	onCameraSpringStiffnessMultiplierChange,
+	cameraSpringDampingMultiplier = 1.13,
+	onCameraSpringDampingMultiplierChange,
+	cameraSpringMassMultiplier = 1.12,
+	onCameraSpringMassMultiplierChange,
 	zoomClassicMode = false,
 	onZoomClassicModeChange,
 	cursorMotionBlur = DEFAULT_CURSOR_MOTION_BLUR,
@@ -939,6 +962,8 @@ export function SettingsPanel({
 	onClearAutoCaptions,
 	onDownloadWhisperSmallModel,
 	onDeleteWhisperSmallModel,
+	nativeCaptureUnavailableSession = false,
+	onOpenNativeCaptureUnavailableModal,
 }: SettingsPanelProps) {
 	const tSettings = useScopedT("settings");
 	const { locale, setLocale, t } = useI18n();
@@ -1199,9 +1224,12 @@ export function SettingsPanel({
 		if (GRADIENTS.includes(selected)) {
 			setGradient(selected);
 		}
+	}, [selected]);
 
-		if (selected.startsWith("data:image") && !customImages.includes(selected)) {
-			setCustomImages((prev) => [selected, ...prev]);
+	useEffect(() => {
+		if (selected.startsWith("data:image")) {
+			setCustomImages((prev) => (prev.includes(selected) ? prev : [selected, ...prev]));
+			return;
 		}
 
 		const isKnownWallpaper =
@@ -1209,16 +1237,11 @@ export function SettingsPanel({
 			wallpaperPreviewPaths.includes(selected) ||
 			extensionWallpaperPaths.includes(selected);
 
-		if (
-			!isKnownWallpaper &&
-			isVideoWallpaperSource(selected) &&
-			!customImages.includes(selected)
-		) {
-			setCustomImages((prev) => [selected, ...prev]);
+		if (!isKnownWallpaper && isVideoWallpaperSource(selected)) {
+			setCustomImages((prev) => (prev.includes(selected) ? prev : [selected, ...prev]));
 		}
 	}, [
 		builtInWallpaperPaths,
-		customImages,
 		extensionWallpaperPaths,
 		selected,
 		wallpaperPreviewPaths,
@@ -1464,14 +1487,33 @@ export function SettingsPanel({
 
 	const resetBackgroundSection = () => {
 		onBackgroundBlurChange?.(initialEditorPreferences.backgroundBlur);
+
+		const preferredWallpaper = initialEditorPreferences.wallpaper;
+		const hasPreferredWallpaper =
+			(preferredWallpaper && builtInWallpaperPaths.includes(preferredWallpaper)) ||
+			(preferredWallpaper && extensionWallpaperPaths.includes(preferredWallpaper)) ||
+			(preferredWallpaper && customImages.includes(preferredWallpaper)) ||
+			(preferredWallpaper && isHexWallpaper(preferredWallpaper)) ||
+			(preferredWallpaper && GRADIENTS.includes(preferredWallpaper));
+
+		onWallpaperChange(
+			(hasPreferredWallpaper ? preferredWallpaper : "") ||
+				builtInWallpaperPaths[0] ||
+				extensionWallpaperPaths[0] ||
+				BUILT_IN_WALLPAPERS[0]?.publicPath ||
+				"",
+		);
 	};
 
 	const resetZoomSection = () => {
-		onZoomTemporalMotionBlurChange?.(initialEditorPreferences.zoomTemporalMotionBlur);
-		onZoomMotionBlurSampleCountChange?.(initialEditorPreferences.zoomMotionBlurSampleCount);
-		onZoomMotionBlurShutterFractionChange?.(
-			initialEditorPreferences.zoomMotionBlurShutterFraction,
+		onZoomMotionBlurTuningChange?.(initialEditorPreferences.zoomMotionBlurTuning);
+		onCameraSpringStiffnessMultiplierChange?.(
+			initialEditorPreferences.cameraSpringStiffnessMultiplier,
 		);
+		onCameraSpringDampingMultiplierChange?.(
+			initialEditorPreferences.cameraSpringDampingMultiplier,
+		);
+		onCameraSpringMassMultiplierChange?.(initialEditorPreferences.cameraSpringMassMultiplier);
 		onZoomInDurationMsChange?.(initialEditorPreferences.zoomInDurationMs);
 		onZoomOutDurationMsChange?.(initialEditorPreferences.zoomOutDurationMs);
 		onZoomClassicModeChange?.(false);
@@ -1498,21 +1540,18 @@ export function SettingsPanel({
 
 	const activeMotionPresetId = useMemo(() => {
 		return (
-			MOTION_PRESET_ORDER.find((presetId) => {
-				const preset = CURSOR_MOTION_PRESETS[presetId];
-				return (
-					preset.zoomInDurationMs === zoomInDurationMs &&
-					preset.zoomOutDurationMs === zoomOutDurationMs &&
-					preset.cursorSize === cursorSize &&
-					preset.cursorSmoothing === cursorSmoothing &&
-					preset.cursorSpringStiffnessMultiplier === cursorSpringStiffnessMultiplier &&
-					preset.cursorSpringDampingMultiplier === cursorSpringDampingMultiplier &&
-					preset.cursorSpringMassMultiplier === cursorSpringMassMultiplier &&
-					preset.cursorMotionBlur === cursorMotionBlur &&
-					preset.cursorClickBounce === cursorClickBounce &&
-					preset.cursorClickBounceDuration === cursorClickBounceDuration
-				);
-			}) ?? null
+			getMatchingCursorMotionPresetId({
+				zoomInDurationMs,
+				zoomOutDurationMs,
+				cursorSize,
+				cursorSmoothing,
+				cursorSpringStiffnessMultiplier,
+				cursorSpringDampingMultiplier,
+				cursorSpringMassMultiplier,
+				cursorMotionBlur,
+				cursorClickBounce,
+				cursorClickBounceDuration,
+			}) ?? "focused"
 		);
 	}, [
 		cursorClickBounce,
@@ -1542,7 +1581,17 @@ export function SettingsPanel({
 	};
 
 	const resetFrameSection = () => {
+		const preferredFrame = initialEditorPreferences.frame;
+		const resolvedFrame = preferredFrame
+			? availableFrames.some((candidate) => candidate.id === preferredFrame)
+				? preferredFrame
+				: null
+			: null;
+		onShadowChange?.(initialEditorPreferences.shadowIntensity);
+		onBorderRadiusChange?.(initialEditorPreferences.borderRadius);
 		onAspectRatioChange?.(initialEditorPreferences.aspectRatio);
+		onPaddingChange?.({ ...initialEditorPreferences.padding });
+		onFrameChange?.(resolvedFrame);
 		removeBackgroundStateRef.current = null;
 	};
 
@@ -2590,6 +2639,282 @@ export function SettingsPanel({
 						triggerClassName="h-10 w-full justify-start rounded-xl border border-foreground/10 bg-foreground/5 px-3 text-sm text-foreground hover:bg-foreground/10 hover:text-foreground"
 					/>
 				</section>
+
+				{showDevMotionControls ? (
+					<section className="flex flex-col gap-2 rounded-xl border border-[#2563EB]/15 bg-[#2563EB]/5 p-3">
+						<div className="flex items-center justify-between gap-3">
+							<div>
+								<SectionLabel>
+									{tSettings("effects.devSection", "Dev")}
+								</SectionLabel>
+								<div className="mt-0.5 text-[10px] text-muted-foreground">
+									{tSettings(
+										"effects.devSectionHint",
+										"Temporary testing controls for native capture and motion tuning.",
+									)}
+								</div>
+							</div>
+							<span className="rounded-full bg-[#2563EB]/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[#2563EB]">
+								DEV
+							</span>
+						</div>
+
+						<div className="rounded-lg border border-foreground/10 bg-background/60 px-3 py-3">
+							<div className="flex items-start justify-between gap-3">
+								<div>
+									<div className="text-[11px] font-medium text-foreground">
+										{tSettings(
+											"effects.nativeCaptureWarningTester",
+											"Native capture warning",
+										)}
+									</div>
+									<div className="mt-0.5 text-[10px] text-muted-foreground">
+										{nativeCaptureUnavailableSession
+											? tSettings(
+													"effects.nativeCaptureWarningTesterUnavailable",
+													"This project is currently marked as native capture unavailable.",
+												)
+											: tSettings(
+													"effects.nativeCaptureWarningTesterAvailable",
+													"This project is not marked as unsupported, but you can still open the modal for UI testing.",
+												)}
+									</div>
+								</div>
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={() => onOpenNativeCaptureUnavailableModal?.()}
+									className="h-8 shrink-0 border-[#2563EB]/20 bg-[#2563EB]/10 text-[#2563EB] hover:bg-[#2563EB]/15"
+								>
+									{tSettings("effects.openNativeCaptureWarning", "Open warning")}
+								</Button>
+							</div>
+						</div>
+
+						<div className="space-y-1.5 rounded-lg border border-foreground/10 bg-background/60 px-3 py-3">
+							<div>
+								<div className="text-[11px] font-medium text-foreground">
+									{tSettings("effects.motionBlurDebug", "Motion Blur Debug")}
+								</div>
+								<div className="mt-0.5 text-[10px] text-muted-foreground">
+									{tSettings(
+										"effects.motionBlurDebugHint",
+										"Development-only tuning for the split move-vs-zoom blur path. Pan controls drive the streak filter, and zoom controls drive the focus-centered zoom filter.",
+									)}
+								</div>
+							</div>
+							<SliderControl
+								label={tSettings("effects.motionBlurPanThreshold", "Pan threshold")}
+								value={zoomMotionBlurTuning.panVelocityThreshold}
+								defaultValue={
+									initialEditorPreferences.zoomMotionBlurTuning
+										.panVelocityThreshold
+								}
+								min={0}
+								max={240}
+								step={1}
+								onChange={(value) =>
+									onZoomMotionBlurTuningChange?.({
+										...zoomMotionBlurTuning,
+										panVelocityThreshold: value,
+									})
+								}
+								formatValue={(value) => `${Math.round(value)} px/s`}
+								parseInput={(text) =>
+									parseFloat(text.replace(/px\/s$/i, "").trim())
+								}
+							/>
+							<SliderControl
+								label={tSettings("effects.motionBlurPanStrength", "Pan max blur")}
+								value={zoomMotionBlurTuning.maxDirectionalBlurPx}
+								defaultValue={
+									initialEditorPreferences.zoomMotionBlurTuning
+										.maxDirectionalBlurPx
+								}
+								min={0}
+								max={32}
+								step={0.1}
+								onChange={(value) =>
+									onZoomMotionBlurTuningChange?.({
+										...zoomMotionBlurTuning,
+										maxDirectionalBlurPx: value,
+									})
+								}
+								formatValue={(value) => `${value.toFixed(1)} px`}
+								parseInput={(text) => parseFloat(text.replace(/px$/i, "").trim())}
+							/>
+							<SliderControl
+								label={tSettings(
+									"effects.motionBlurZoomThreshold",
+									"Zoom threshold",
+								)}
+								value={zoomMotionBlurTuning.zoomVelocityThreshold}
+								defaultValue={
+									initialEditorPreferences.zoomMotionBlurTuning
+										.zoomVelocityThreshold
+								}
+								min={0}
+								max={0.4}
+								step={0.005}
+								onChange={(value) =>
+									onZoomMotionBlurTuningChange?.({
+										...zoomMotionBlurTuning,
+										zoomVelocityThreshold: value,
+									})
+								}
+								formatValue={(value) => value.toFixed(3)}
+								parseInput={(text) => parseFloat(text)}
+							/>
+							<SliderControl
+								label={tSettings(
+									"effects.motionBlurZoomStrength",
+									"Zoom blur strength",
+								)}
+								value={zoomMotionBlurTuning.maxRadialBlurStrength}
+								defaultValue={
+									initialEditorPreferences.zoomMotionBlurTuning
+										.maxRadialBlurStrength
+								}
+								min={0}
+								max={0.5}
+								step={0.005}
+								onChange={(value) =>
+									onZoomMotionBlurTuningChange?.({
+										...zoomMotionBlurTuning,
+										maxRadialBlurStrength: value,
+									})
+								}
+								formatValue={(value) => value.toFixed(3)}
+								parseInput={(text) => parseFloat(text)}
+							/>
+						</div>
+
+						<div className="space-y-1.5 rounded-lg border border-foreground/10 bg-background/60 px-3 py-3">
+							<div>
+								<div className="text-[11px] font-medium text-foreground">
+									{tSettings("effects.cameraDebugTuning", "Camera Debug Tuning")}
+								</div>
+								<div className="mt-0.5 text-[10px] text-muted-foreground">
+									{tSettings(
+										"effects.cameraDebugTuningHint",
+										"Development-only spring tuning controls for camera motion.",
+									)}
+								</div>
+							</div>
+							<SliderControl
+								label={tSettings(
+									"effects.cameraSpringStiffnessMultiplier",
+									"Camera stiffness",
+								)}
+								value={cameraSpringStiffnessMultiplier}
+								defaultValue={
+									initialEditorPreferences.cameraSpringStiffnessMultiplier
+								}
+								min={0.25}
+								max={3}
+								step={0.01}
+								onChange={(value) =>
+									onCameraSpringStiffnessMultiplierChange?.(value)
+								}
+								formatValue={(value) => `${value.toFixed(2)}×`}
+								parseInput={(text) => parseFloat(text.replace(/×$/, ""))}
+							/>
+							<SliderControl
+								label={tSettings(
+									"effects.cameraSpringDampingMultiplier",
+									"Camera damping",
+								)}
+								value={cameraSpringDampingMultiplier}
+								defaultValue={
+									initialEditorPreferences.cameraSpringDampingMultiplier
+								}
+								min={0.25}
+								max={3}
+								step={0.01}
+								onChange={(value) => onCameraSpringDampingMultiplierChange?.(value)}
+								formatValue={(value) => `${value.toFixed(2)}×`}
+								parseInput={(text) => parseFloat(text.replace(/×$/, ""))}
+							/>
+							<SliderControl
+								label={tSettings(
+									"effects.cameraSpringMassMultiplier",
+									"Camera mass",
+								)}
+								value={cameraSpringMassMultiplier}
+								defaultValue={initialEditorPreferences.cameraSpringMassMultiplier}
+								min={0.25}
+								max={3}
+								step={0.01}
+								onChange={(value) => onCameraSpringMassMultiplierChange?.(value)}
+								formatValue={(value) => `${value.toFixed(2)}×`}
+								parseInput={(text) => parseFloat(text.replace(/×$/, ""))}
+							/>
+						</div>
+
+						<div className="space-y-1.5 rounded-lg border border-foreground/10 bg-background/60 px-3 py-3">
+							<div>
+								<div className="text-[11px] font-medium text-foreground">
+									{tSettings("effects.cursorDebugTuning", "Cursor Debug Tuning")}
+								</div>
+								<div className="mt-0.5 text-[10px] text-muted-foreground">
+									{tSettings(
+										"effects.cursorDebugTuningHint",
+										"Development-only spring tuning controls.",
+									)}
+								</div>
+							</div>
+							<SliderControl
+								label={tSettings(
+									"effects.cursorSpringStiffnessMultiplier",
+									"Spring stiffness",
+								)}
+								value={cursorSpringStiffnessMultiplier}
+								defaultValue={
+									initialEditorPreferences.cursorSpringStiffnessMultiplier
+								}
+								min={0.25}
+								max={3}
+								step={0.01}
+								onChange={(value) =>
+									onCursorSpringStiffnessMultiplierChange?.(value)
+								}
+								formatValue={(value) => `${value.toFixed(2)}×`}
+								parseInput={(text) => parseFloat(text.replace(/×$/, ""))}
+							/>
+							<SliderControl
+								label={tSettings(
+									"effects.cursorSpringDampingMultiplier",
+									"Spring damping",
+								)}
+								value={cursorSpringDampingMultiplier}
+								defaultValue={
+									initialEditorPreferences.cursorSpringDampingMultiplier
+								}
+								min={0.25}
+								max={3}
+								step={0.01}
+								onChange={(value) => onCursorSpringDampingMultiplierChange?.(value)}
+								formatValue={(value) => `${value.toFixed(2)}×`}
+								parseInput={(text) => parseFloat(text.replace(/×$/, ""))}
+							/>
+							<SliderControl
+								label={tSettings(
+									"effects.cursorSpringMassMultiplier",
+									"Spring mass",
+								)}
+								value={cursorSpringMassMultiplier}
+								defaultValue={initialEditorPreferences.cursorSpringMassMultiplier}
+								min={0.25}
+								max={3}
+								step={0.01}
+								onChange={(value) => onCursorSpringMassMultiplierChange?.(value)}
+								formatValue={(value) => `${value.toFixed(2)}×`}
+								parseInput={(text) => parseFloat(text.replace(/×$/, ""))}
+							/>
+						</div>
+					</section>
+				) : null}
 			</div>
 		);
 
@@ -2710,80 +3035,22 @@ export function SettingsPanel({
 						)}
 					</div>
 				)}
-				{showDevMotionControls ? (
-					<div className="space-y-1.5 rounded-lg border border-[#2563EB]/15 bg-[#2563EB]/5 px-3 py-3">
-						<div>
-							<div className="text-[11px] font-medium text-foreground">
-								{tSettings("effects.exportBlurDebug", "Export Blur Debug")}
-							</div>
-							<div className="mt-0.5 text-[10px] text-muted-foreground">
-								{tSettings(
-									"effects.exportBlurDebugHint",
-									"Development-only temporal blur tuning for export and preview parity checks.",
+				<div className="rounded-lg border border-foreground/10 bg-foreground/[0.03] px-3 py-2">
+					<div className="text-[10px] text-muted-foreground">
+						{showDevMotionControls
+							? tSettings(
+									"effects.exportBlurMovedToDev",
+									"Export blur tuning is available in Settings > Dev.",
+								)
+							: tSettings(
+									"effects.exportBlurLocked",
+									"Export blur is fixed for this build.",
 								)}
-							</div>
-						</div>
-						<SliderControl
-							label={tSettings("effects.zoomTemporalMotionBlur", "Temporal blur")}
-							value={zoomTemporalMotionBlur}
-							defaultValue={initialEditorPreferences.zoomTemporalMotionBlur}
-							min={0}
-							max={2}
-							step={0.05}
-							onChange={(value) => onZoomTemporalMotionBlurChange?.(value)}
-							formatValue={(value) => `${value.toFixed(2)}×`}
-							parseInput={(text) => parseFloat(text.replace(/×$/, ""))}
-						/>
-						<SliderControl
-							label={tSettings("effects.zoomMotionBlurSampleCount", "Sample count")}
-							value={
-								zoomMotionBlurSampleCount ??
-								TEMPORAL_MOTION_BLUR_DEFAULT_SAMPLE_COUNT
-							}
-							defaultValue={
-								initialEditorPreferences.zoomMotionBlurSampleCount ??
-								TEMPORAL_MOTION_BLUR_DEFAULT_SAMPLE_COUNT
-							}
-							min={TEMPORAL_MOTION_BLUR_MIN_SAMPLE_COUNT}
-							max={TEMPORAL_MOTION_BLUR_MAX_SAMPLE_COUNT}
-							step={2}
-							onChange={(value) =>
-								onZoomMotionBlurSampleCountChange?.(Math.round(value))
-							}
-							formatValue={(value) => `${Math.round(value)} samples`}
-							parseInput={(text) => parseFloat(text.replace(/samples?$/i, "").trim())}
-						/>
-						<SliderControl
-							label={tSettings("effects.zoomMotionBlurShutterFraction", "Shutter")}
-							value={
-								zoomMotionBlurShutterFraction ??
-								TEMPORAL_MOTION_BLUR_DEFAULT_SHUTTER_FRACTION
-							}
-							defaultValue={
-								initialEditorPreferences.zoomMotionBlurShutterFraction ??
-								TEMPORAL_MOTION_BLUR_DEFAULT_SHUTTER_FRACTION
-							}
-							min={TEMPORAL_MOTION_BLUR_MIN_SHUTTER_FRACTION}
-							max={TEMPORAL_MOTION_BLUR_MAX_SHUTTER_FRACTION}
-							step={0.01}
-							onChange={(value) => onZoomMotionBlurShutterFractionChange?.(value)}
-							formatValue={(value) => `${Math.round(value * 100)}%`}
-							parseInput={(text) => parseFloat(text.replace(/%$/, "")) / 100}
-						/>
 					</div>
-				) : (
-					<div className="rounded-lg border border-foreground/10 bg-foreground/[0.03] px-3 py-2">
-						<div className="text-[10px] text-muted-foreground">
-							{tSettings(
-								"effects.exportBlurLocked",
-								"Export blur is fixed for this build.",
-							)}
-						</div>
-						<div className="mt-1 text-[12px] font-medium text-foreground">
-							{`${TEMPORAL_MOTION_BLUR_DEFAULT_SAMPLE_COUNT} samples · ${Math.round(TEMPORAL_MOTION_BLUR_DEFAULT_SHUTTER_FRACTION * 100)}% shutter`}
-						</div>
+					<div className="mt-1 text-[12px] font-medium text-foreground">
+						{`${TEMPORAL_MOTION_BLUR_DEFAULT_SAMPLE_COUNT} samples · ${Math.round(TEMPORAL_MOTION_BLUR_DEFAULT_SHUTTER_FRACTION * 100)}% shutter`}
 					</div>
-				)}
+				</div>
 				{selectedZoomId && (
 					<Button
 						onClick={() => {
@@ -2801,6 +3068,45 @@ export function SettingsPanel({
 			</section>
 		);
 
+			const audioSectionContent = (
+				<section className="flex flex-col gap-3">
+				<div className="flex items-center justify-between gap-3">
+					<SectionLabel>{tSettings("audio.volumeTitle", "Audio")}</SectionLabel>
+					<button
+						type="button"
+						onClick={() => {
+							onAudioVolumeChange?.(1);
+							onAudioNormalizeChange?.(false);
+						}}
+						className="text-[10px] text-[#2563EB] transition-opacity hover:opacity-80"
+					>
+						{t("common.actions.reset", "Reset")}
+					</button>
+				</div>
+					<SliderControl
+						label={tSettings("audio.volume", "Volume")}
+					value={selectedAudioVolume ?? 1}
+					defaultValue={1}
+					min={0}
+					max={1}
+					step={0.01}
+					onChange={(v) => onAudioVolumeChange?.(v)}
+					formatValue={(v) => `${Math.round(v * 100)}%`}
+						parseInput={(text) => parseFloat(text.replace(/%$/, "")) / 100}
+					/>
+					<div className="flex items-center justify-between rounded-lg bg-foreground/[0.03] px-2.5 py-1.5">
+						<span className="text-[10px] text-muted-foreground">
+							{tSettings("audio.normalize", "Normalize")}
+						</span>
+						<Switch
+							checked={Boolean(selectedAudioNormalize)}
+							onCheckedChange={(v) => onAudioNormalizeChange?.(v)}
+							className="data-[state=checked]:bg-[#2563EB] scale-75"
+						/>
+					</div>
+				</section>
+			);
+
 		const clipSectionContent = (
 			<section className="flex flex-col gap-2">
 				<div className="flex items-center justify-between gap-3">
@@ -2811,16 +3117,7 @@ export function SettingsPanel({
 						</span>
 					)}
 				</div>
-				<div className="flex items-center justify-between rounded-lg bg-foreground/[0.03] px-2.5 py-1.5">
-					<span className="text-[10px] text-muted-foreground">
-						{tSettings("clip.muteAudio", "Mute Audio")}
-					</span>
-					<Switch
-						checked={selectedClipMuted ?? false}
-						onCheckedChange={(v) => onClipMutedChange?.(v)}
-						className="data-[state=checked]:bg-[#06b6d4] scale-75"
-					/>
-				</div>
+
 				<div className="flex items-center gap-3">
 					<SectionLabel>{tSettings("speed.label", "Speed")}</SectionLabel>
 				</div>
@@ -2861,19 +3158,100 @@ export function SettingsPanel({
 						);
 					})}
 				</div>
-				{selectedClipId && (
-					<Button
-						onClick={() => {
-							if (selectedClipId && onClipDelete) onClipDelete(selectedClipId);
-						}}
-						variant="destructive"
-						size="sm"
-						className="mt-1 h-8 w-full gap-2 border border-red-500/20 bg-red-500/10 text-xs text-red-400 transition-all hover:border-red-500/30 hover:bg-red-500/20"
-					>
-						<Trash2 className="h-3 w-3" />
-						{tSettings("clip.delete", "Delete Clip")}
-					</Button>
-				)}
+
+				<div className="mt-2 flex flex-col gap-2 border-t border-foreground/5 pt-3">
+					<SectionLabel>{tSettings("audio.title", "Audio")}</SectionLabel>
+
+					<div className="flex items-center justify-between rounded-lg bg-foreground/[0.03] px-2.5 py-1.5">
+						<div>
+							<span className="text-[10px] text-muted-foreground">
+								{tSettings("clip.mute", "Mute")}
+							</span>
+							<p className="text-[9px] text-muted-foreground/50 mt-0.5">
+								{selectedClipMuted
+									? tSettings("clip.mutedState", "Audio is muted")
+									: tSettings("clip.unmutedState", "Audio is playing")}
+							</p>
+						</div>
+						<Switch
+							checked={selectedClipMuted ?? false}
+							onCheckedChange={(v) => onClipMutedChange?.(v)}
+							className="data-[state=checked]:bg-[#06b6d4] scale-75"
+						/>
+					</div>
+					{hasClipSourceAudio && (
+						<div className="flex items-center justify-between rounded-lg bg-foreground/[0.03] px-2.5 py-1.5">
+							<span className="text-[10px] text-muted-foreground">
+								{tSettings("clip.separateClipFromAudio", "Separate clip from audio")}
+							</span>
+							<Switch
+								checked={selectedClipShowSourceAudio ?? false}
+								onCheckedChange={(v) => onClipShowSourceAudioChange?.(v)}
+								className="data-[state=checked]:bg-[#06b6d4] scale-75"
+							/>
+						</div>
+					)}
+				</div>
+
+				{selectedClipId &&
+					hasClipSourceAudio &&
+					sourceAudioTrackMeta.length > 0 && (
+						<div className="mt-1 flex flex-col gap-3">
+							{sourceAudioTrackMeta.map((track) => {
+								const settings = sourceAudioTrackSettings[track.id] ?? {
+									volume: 1,
+									normalize: false,
+								};
+								return (
+									<div
+										key={track.id}
+										className="rounded-lg border border-foreground/10 bg-foreground/[0.03] px-3 py-2"
+									>
+										<div className="mb-2 flex items-center justify-between">
+											<span className="text-[11px] font-medium text-foreground">
+												{track.label}
+											</span>
+											<button
+												type="button"
+												onClick={() => {
+													onSourceAudioTrackVolumeChange?.(track.id, 1);
+													onSourceAudioTrackNormalizeChange?.(track.id, false);
+												}}
+												className="text-[10px] text-[#2563EB] transition-opacity hover:opacity-80"
+											>
+												{t("common.actions.reset", "Reset")}
+											</button>
+										</div>
+										<div className="mb-2 flex items-center justify-between rounded-lg bg-foreground/[0.03] px-2.5 py-1.5">
+											<span className="text-[10px] text-muted-foreground">
+												{tSettings("audio.normalize", "Normalize")}
+											</span>
+											<Switch
+												checked={settings.normalize}
+												onCheckedChange={(v) =>
+													onSourceAudioTrackNormalizeChange?.(track.id, v)
+												}
+												className="data-[state=checked]:bg-[#06b6d4] scale-75"
+											/>
+										</div>
+										<SliderControl
+											label={tSettings("audio.volume", "Volume")}
+											value={settings.volume}
+											defaultValue={1}
+											min={0}
+											max={2}
+											step={0.01}
+											onChange={(v) => onSourceAudioTrackVolumeChange?.(track.id, v)}
+											formatValue={(v) => `${Math.round(v * 100)}%`}
+											parseInput={(text) =>
+												parseFloat(text.replace(/%$/, "")) / 100
+											}
+										/>
+									</div>
+								);
+							})}
+						</div>
+					)}
 			</section>
 		);
 
@@ -2886,6 +3264,8 @@ export function SettingsPanel({
 				return zoomItemSectionContent;
 			case "clip":
 				return clipSectionContent;
+			case "audio":
+				return audioSectionContent;
 			case "frame":
 				return sceneSectionContent;
 			case "crop":
@@ -3028,75 +3408,13 @@ export function SettingsPanel({
 								}}
 							/>
 							{showDevMotionControls ? (
-								<div className="space-y-1.5 rounded-lg border border-[#2563EB]/15 bg-[#2563EB]/5 px-3 py-3">
-									<div>
-										<div className="text-[11px] font-medium text-foreground">
-											{tSettings(
-												"effects.cursorDebugTuning",
-												"Cursor Debug Tuning",
-											)}
-										</div>
-										<div className="mt-0.5 text-[10px] text-muted-foreground">
-											{tSettings(
-												"effects.cursorDebugTuningHint",
-												"Development-only spring tuning controls.",
-											)}
-										</div>
+								<div className="rounded-lg border border-foreground/10 bg-foreground/[0.03] px-3 py-2">
+									<div className="text-[10px] text-muted-foreground">
+										{tSettings(
+											"effects.cursorDebugMovedToDev",
+											"Cursor spring tuning is available in Settings > Dev.",
+										)}
 									</div>
-									<SliderControl
-										label={tSettings(
-											"effects.cursorSpringStiffnessMultiplier",
-											"Spring stiffness",
-										)}
-										value={cursorSpringStiffnessMultiplier}
-										defaultValue={
-											initialEditorPreferences.cursorSpringStiffnessMultiplier
-										}
-										min={0.25}
-										max={3}
-										step={0.01}
-										onChange={(value) =>
-											onCursorSpringStiffnessMultiplierChange?.(value)
-										}
-										formatValue={(value) => `${value.toFixed(2)}×`}
-										parseInput={(text) => parseFloat(text.replace(/×$/, ""))}
-									/>
-									<SliderControl
-										label={tSettings(
-											"effects.cursorSpringDampingMultiplier",
-											"Spring damping",
-										)}
-										value={cursorSpringDampingMultiplier}
-										defaultValue={
-											initialEditorPreferences.cursorSpringDampingMultiplier
-										}
-										min={0.25}
-										max={3}
-										step={0.01}
-										onChange={(value) =>
-											onCursorSpringDampingMultiplierChange?.(value)
-										}
-										formatValue={(value) => `${value.toFixed(2)}×`}
-										parseInput={(text) => parseFloat(text.replace(/×$/, ""))}
-									/>
-									<SliderControl
-										label={tSettings(
-											"effects.cursorSpringMassMultiplier",
-											"Spring mass",
-										)}
-										value={cursorSpringMassMultiplier}
-										defaultValue={
-											initialEditorPreferences.cursorSpringMassMultiplier
-										}
-										min={0.25}
-										max={3}
-										step={0.01}
-										onChange={(value) =>
-											onCursorSpringMassMultiplierChange?.(value)
-										}
-										formatValue={(value) => `${value.toFixed(2)}×`}
-										parseInput={(text) => parseFloat(text.replace(/×$/, ""))}
-									/>
 								</div>
 							) : null}
 						</div>
@@ -3389,41 +3707,68 @@ export function SettingsPanel({
 
 			<div
 				className={cn(
-					"flex-shrink-0 border-t border-foreground/10 bg-editor-header p-4 pt-3",
-					!selectedAudioId && "hidden",
+					"flex-shrink-0 border-t border-foreground/10 bg-editor-panel p-4 pt-3",
+					(() => {
+						if (activeEffectSection === "clip" && selectedClipId) return false;
+						if (activeEffectSection === "zoom" && selectedZoomId) return false;
+						if (activeEffectSection === "audio" && selectedAudioId) return false;
+						if (selectedAnnotationId) return false; // Annotation editor handles its own but let's see
+						return true;
+					})() && "hidden",
 				)}
 			>
-				{selectedAudioId && (
-					<div>
-						<div className="mb-3 flex items-center justify-between">
-							<span className="text-sm font-medium text-foreground">
-								{tSettings("audio.volumeTitle", "Audio Volume")}
-							</span>
-							<span className="rounded-full bg-[#2563EB]/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[#2563EB]">
-								{Math.round((selectedAudioVolume ?? 1) * 100)}%
-							</span>
-						</div>
-						<SliderControl
-							label={tSettings("audio.volume", "Volume")}
-							value={selectedAudioVolume ?? 1}
-							defaultValue={1}
-							min={0}
-							max={1}
-							step={0.01}
-							onChange={(v) => onAudioVolumeChange?.(v)}
-							formatValue={(v) => `${Math.round(v * 100)}%`}
-							parseInput={(text) => parseFloat(text.replace(/%$/, "")) / 100}
-						/>
-						<Button
-							onClick={() => selectedAudioId && onAudioDelete?.(selectedAudioId)}
-							variant="destructive"
-							size="sm"
-							className="mt-2 h-8 w-full gap-2 border border-red-500/20 bg-red-500/10 text-xs text-red-400 transition-all hover:border-red-500/30 hover:bg-red-500/20"
-						>
-							<Trash2 className="h-3 w-3" />
-							{tSettings("audio.deleteRegion", "Delete Audio")}
-						</Button>
-					</div>
+				{activeEffectSection === "clip" && selectedClipId && (
+					<Button
+						onClick={() => {
+							if (selectedClipId && onClipDelete) onClipDelete(selectedClipId);
+						}}
+						variant="destructive"
+						size="sm"
+						className="h-8 w-full gap-2 border border-red-500/20 bg-red-500/10 text-xs text-red-400 transition-all hover:border-red-500/30 hover:bg-red-500/20"
+					>
+						<Trash2 className="h-3 w-3" />
+						{tSettings("clip.delete", "Delete Clip")}
+					</Button>
+				)}
+				{activeEffectSection === "zoom" && selectedZoomId && (
+					<Button
+						onClick={() => {
+							if (selectedZoomId && onZoomDelete) onZoomDelete(selectedZoomId);
+						}}
+						variant="destructive"
+						size="sm"
+						className="h-8 w-full gap-2 border border-red-500/20 bg-red-500/10 text-xs text-red-400 transition-all hover:border-red-500/30 hover:bg-red-500/20"
+					>
+						<Trash2 className="h-3 w-3" />
+						{tSettings("zoom.deleteZoom", "Delete Zoom")}
+					</Button>
+				)}
+				{activeEffectSection === "audio" && selectedAudioId && (
+					<Button
+						onClick={() => {
+							if (selectedAudioId && onAudioDelete) onAudioDelete(selectedAudioId);
+						}}
+						variant="destructive"
+						size="sm"
+						className="h-8 w-full gap-2 border border-red-500/20 bg-red-500/10 text-xs text-red-400 transition-all hover:border-red-500/30 hover:bg-red-500/20"
+					>
+						<Trash2 className="h-3 w-3" />
+						{tSettings("audio.deleteRegion", "Delete Audio")}
+					</Button>
+				)}
+				{selectedAnnotationId && (
+					<Button
+						onClick={() => {
+							if (selectedAnnotationId && onAnnotationDelete)
+								onAnnotationDelete(selectedAnnotationId);
+						}}
+						variant="destructive"
+						size="sm"
+						className="h-8 w-full gap-2 border border-red-500/20 bg-red-500/10 text-xs text-red-400 transition-all hover:border-red-500/30 hover:bg-red-500/20"
+					>
+						<Trash2 className="h-3 w-3" />
+						{tSettings("annotation.delete", "Delete Annotation")}
+					</Button>
 				)}
 			</div>
 		</div>

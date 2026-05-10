@@ -1,7 +1,58 @@
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import electron from "vite-plugin-electron/simple";
+
+function electronMainCjsOutputPlugin(): Plugin {
+	return {
+		name: "recordly-electron-main-cjs-output",
+		enforce: "post",
+		config(config) {
+			// Vite mergeConfig concatenates lib.formats with the plugin's ESM default.
+			config.build ??= {};
+			const build = config.build;
+			const lib = build.lib;
+			if (lib && typeof lib === "object") {
+				lib.formats = ["cjs"];
+				lib.fileName = (_format, entryName) => `${entryName}.cjs`;
+			}
+
+			build.rollupOptions ??= {};
+			const rollupOptions = build.rollupOptions;
+			const cjsOutput = {
+				format: "cjs" as const,
+				inlineDynamicImports: true,
+				entryFileNames: "[name].cjs",
+				chunkFileNames: "[name]-[hash].cjs",
+			};
+
+			rollupOptions.output = Array.isArray(rollupOptions.output)
+				? rollupOptions.output.map((output) => ({ ...output, ...cjsOutput }))
+				: { ...(rollupOptions.output ?? {}), ...cjsOutput };
+		},
+	};
+}
+
+function electronMainCjsGuardPlugin(): Plugin {
+	return {
+		name: "recordly-electron-main-cjs-guard",
+		closeBundle() {
+			const scriptPath = path.resolve(__dirname, "scripts/smoke-electron-main-cjs.mjs");
+			const result = spawnSync(process.execPath, [scriptPath], {
+				cwd: __dirname,
+				encoding: "utf8",
+			});
+
+			if (result.status !== 0) {
+				const details = [result.stdout, result.stderr].filter(Boolean).join("\n");
+				throw new Error(
+					`Electron main CJS smoke failed after Vite build.${details ? `\n${details}` : ""}`,
+				);
+			}
+		},
+	};
+}
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -16,15 +67,19 @@ export default defineConfig({
 						lib: {
 							entry: "electron/main.ts",
 							formats: ["cjs"],
+							fileName: (_format, entryName) => `${entryName}.cjs`,
 						},
 						rollupOptions: {
 							external: ["ffmpeg-static", "uiohook-napi"],
 							output: {
+								format: "cjs",
+								inlineDynamicImports: true,
 								entryFileNames: "[name].cjs",
-								chunkFileNames: "[name].cjs",
+								chunkFileNames: "[name]-[hash].cjs",
 							},
 						},
 					},
+					plugins: [electronMainCjsOutputPlugin(), electronMainCjsGuardPlugin()],
 				},
 			},
 			preload: {
