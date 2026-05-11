@@ -714,12 +714,16 @@ export function registerRecordingHandlers(
 				console.error("Failed to start native ScreenCaptureKit recording:", error);
 				const errorStr = String(error);
 
-				// Detect TCC (screen recording permission) errors and show a helpful dialog
-				if (
+				// Detect TCC (screen recording permission) errors and show a helpful dialog.
+				// A timeout waiting for the recorder to start is almost always a
+				// permission issue — ScreenCaptureKit silently stalls when access
+				// hasn't been granted.
+				const isPermissionError =
 					errorStr.includes("declined TCC") ||
 					errorStr.includes("declined TCCs") ||
-					errorStr.includes("SCREEN_RECORDING_PERMISSION_DENIED")
-				) {
+					errorStr.includes("SCREEN_RECORDING_PERMISSION_DENIED") ||
+					errorStr.includes("Timed out waiting for ScreenCaptureKit");
+				if (isPermissionError) {
 					const { response } = await dialog.showMessageBox({
 						type: "warning",
 						title: "Screen Recording Permission Required",

@@ -193,6 +193,12 @@
 			"high": "High",
 			"original": "Original"
 		},
+		"memoryTitle": "Memory",
+		"memory": {
+			"low": "Low",
+			"balanced": "Balanced",
+			"high": "High"
+		},
 		"fpsTitle": "FPS",
 		"loop": "Loop",
 		"outputDimensions": "Output: {{dimensions}}px",

@@ -1,4 +1,4 @@
-import type { ExportEncodeBackend, ExportEncodingMode } from "./types";
+import type { ExportEncodeBackend, ExportEncodingMode, ExportMemoryUsage } from "./types";
 
 const DEFAULT_ENCODING_MODE: ExportEncodingMode = "balanced";
 type WebCodecsLatencyMode = "quality" | "realtime";
@@ -79,6 +79,7 @@ interface ExportBackpressureProfileOptions {
 	height: number;
 	frameRate: number;
 	encodingMode?: ExportEncodingMode;
+	memoryUsage?: ExportMemoryUsage;
 	hardwareConcurrency?: number;
 }
 
@@ -110,6 +111,52 @@ export function getWebCodecsKeyFrameInterval(
 	return Math.max(1, Math.round(frameRate * KEYFRAME_INTERVAL_SECONDS[resolvedEncodingMode]));
 }
 
+interface MemoryTieredProfile {
+	low: Omit<ExportBackpressureProfile, "name" | "maxEncodeQueue">;
+	balanced: Omit<ExportBackpressureProfile, "name" | "maxEncodeQueue">;
+	high: Omit<ExportBackpressureProfile, "name" | "maxEncodeQueue">;
+}
+
+const BREEZE_CONSERVATIVE: MemoryTieredProfile = {
+	low: { maxDecodeQueue: 4, maxPendingFrames: 8, maxInFlightNativeWrites: 1 },
+	balanced: { maxDecodeQueue: 6, maxPendingFrames: 12, maxInFlightNativeWrites: 1 },
+	high: { maxDecodeQueue: 8, maxPendingFrames: 16, maxInFlightNativeWrites: 2 },
+};
+
+const BREEZE_BALANCED: MemoryTieredProfile = {
+	low: { maxDecodeQueue: 8, maxPendingFrames: 16, maxInFlightNativeWrites: 2 },
+	balanced: { maxDecodeQueue: 12, maxPendingFrames: 28, maxInFlightNativeWrites: 4 },
+	high: { maxDecodeQueue: 12, maxPendingFrames: 28, maxInFlightNativeWrites: 4 },
+};
+
+const BREEZE_BALANCED_PLUS: MemoryTieredProfile = {
+	low: { maxDecodeQueue: 8, maxPendingFrames: 20, maxInFlightNativeWrites: 4 },
+	balanced: { maxDecodeQueue: 14, maxPendingFrames: 40, maxInFlightNativeWrites: 8 },
+	high: { maxDecodeQueue: 14, maxPendingFrames: 40, maxInFlightNativeWrites: 8 },
+};
+
+const WEBCODECS_CONSERVATIVE: MemoryTieredProfile = {
+	low: { maxDecodeQueue: 6, maxPendingFrames: 12, maxInFlightNativeWrites: 1 },
+	balanced: { maxDecodeQueue: 7, maxPendingFrames: 16, maxInFlightNativeWrites: 1 },
+	high: { maxDecodeQueue: 8, maxPendingFrames: 20, maxInFlightNativeWrites: 1 },
+};
+
+const WEBCODECS_BALANCED: MemoryTieredProfile = {
+	low: { maxDecodeQueue: 6, maxPendingFrames: 14, maxInFlightNativeWrites: 1 },
+	balanced: { maxDecodeQueue: 10, maxPendingFrames: 24, maxInFlightNativeWrites: 1 },
+	high: { maxDecodeQueue: 10, maxPendingFrames: 24, maxInFlightNativeWrites: 1 },
+};
+
+const WEBCODECS_BALANCED_PLUS: MemoryTieredProfile = {
+	low: { maxDecodeQueue: 8, maxPendingFrames: 18, maxInFlightNativeWrites: 1 },
+	balanced: { maxDecodeQueue: 12, maxPendingFrames: 32, maxInFlightNativeWrites: 1 },
+	high: { maxDecodeQueue: 12, maxPendingFrames: 32, maxInFlightNativeWrites: 1 },
+};
+
+function resolveMemoryUsage(memoryUsage?: ExportMemoryUsage): ExportMemoryUsage {
+	return memoryUsage ?? "low";
+}
+
 export function getExportBackpressureProfile(
 	options: ExportBackpressureProfileOptions,
 ): ExportBackpressureProfile {
@@ -124,15 +171,14 @@ export function getExportBackpressureProfile(
 	const isHeavyWorkload = relativePixelRate >= 1.5;
 	const isExtremeWorkload = relativePixelRate >= 3;
 	const maxEncodeQueue = getWebCodecsEncodeQueueLimit(options.frameRate, options.encodingMode);
+	const mem = resolveMemoryUsage(options.memoryUsage);
 
 	if (options.encodeBackend === "ffmpeg") {
 		if (isLowCoreSystem || isExtremeWorkload) {
 			return {
 				name: "breeze-conservative",
 				maxEncodeQueue,
-				maxDecodeQueue: 4,
-				maxPendingFrames: 8,
-				maxInFlightNativeWrites: 1,
+				...BREEZE_CONSERVATIVE[mem],
 			};
 		}
 
@@ -140,18 +186,14 @@ export function getExportBackpressureProfile(
 			return {
 				name: "breeze-balanced-plus",
 				maxEncodeQueue,
-				maxDecodeQueue: 14,
-				maxPendingFrames: 40,
-				maxInFlightNativeWrites: 8,
+				...BREEZE_BALANCED_PLUS[mem],
 			};
 		}
 
 		return {
 			name: "breeze-balanced",
 			maxEncodeQueue,
-			maxDecodeQueue: 12,
-			maxPendingFrames: 28,
-			maxInFlightNativeWrites: 4,
+			...BREEZE_BALANCED[mem],
 		};
 	}
 
@@ -159,9 +201,7 @@ export function getExportBackpressureProfile(
 		return {
 			name: "webcodecs-conservative",
 			maxEncodeQueue,
-			maxDecodeQueue: 6,
-			maxPendingFrames: 12,
-			maxInFlightNativeWrites: 1,
+			...WEBCODECS_CONSERVATIVE[mem],
 		};
 	}
 
@@ -169,17 +209,13 @@ export function getExportBackpressureProfile(
 		return {
 			name: "webcodecs-balanced-plus",
 			maxEncodeQueue,
-			maxDecodeQueue: 12,
-			maxPendingFrames: 32,
-			maxInFlightNativeWrites: 1,
+			...WEBCODECS_BALANCED_PLUS[mem],
 		};
 	}
 
 	return {
 		name: "webcodecs-balanced",
 		maxEncodeQueue,
-		maxDecodeQueue: 10,
-		maxPendingFrames: 24,
-		maxInFlightNativeWrites: 1,
+		...WEBCODECS_BALANCED[mem],
 	};
 }

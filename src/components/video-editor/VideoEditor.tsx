@@ -58,6 +58,7 @@ import {
 	type ExportBackendPreference,
 	type ExportEncodingMode,
 	type ExportFormat,
+	type ExportMemoryUsage,
 	type ExportMp4FrameRate,
 	type ExportPipelineModel,
 	type ExportProgress,
@@ -721,6 +722,9 @@ export default function VideoEditor() {
 	);
 	const [exportEncodingMode, setExportEncodingMode] = useState<ExportEncodingMode>(
 		initialEditorPreferences.exportEncodingMode,
+	);
+	const [exportMemoryUsage, setExportMemoryUsage] = useState<ExportMemoryUsage>(
+		initialEditorPreferences.exportMemoryUsage,
 	);
 	const [exportBackendPreference, setExportBackendPreference] = useState<ExportBackendPreference>(
 		initialEditorPreferences.exportBackendPreference,
@@ -2560,6 +2564,7 @@ export default function VideoEditor() {
 			webcam,
 			aspectRatio,
 			exportEncodingMode,
+			exportMemoryUsage,
 			exportBackendPreference,
 			exportPipelineModel,
 			exportQuality,
@@ -2611,6 +2616,7 @@ export default function VideoEditor() {
 		webcam,
 		aspectRatio,
 		exportEncodingMode,
+		exportMemoryUsage,
 		exportBackendPreference,
 		exportPipelineModel,
 		exportQuality,
@@ -4329,6 +4335,7 @@ export default function VideoEditor() {
 							settings.encodingMode ??
 							exportEncodingMode)
 						: (settings.encodingMode ?? exportEncodingMode);
+					const memoryUsage = settings.memoryUsage ?? exportMemoryUsage;
 					const selectedMp4FrameRate = smokeExportConfig.enabled
 						? (smokeExportConfig.fps ?? settings.mp4FrameRate ?? mp4FrameRate)
 						: (settings.mp4FrameRate ?? mp4FrameRate);
@@ -4376,6 +4383,7 @@ export default function VideoEditor() {
 						bitrate,
 						codec: DEFAULT_MP4_CODEC,
 						encodingMode,
+						memoryUsage,
 						preferredEncoderPath: supportedSourceDimensions.encoderPath,
 						preferredRenderBackend: smokeExportConfig.renderBackend,
 						experimentalNativeExport: useExperimentalNativeExport,
@@ -4861,6 +4869,7 @@ export default function VideoEditor() {
 		const settings: ExportSettings = {
 			format: exportFormat,
 			encodingMode: exportFormat === "mp4" ? exportEncodingMode : undefined,
+			memoryUsage: exportFormat === "mp4" ? exportMemoryUsage : undefined,
 			mp4FrameRate: exportFormat === "mp4" ? mp4FrameRate : undefined,
 			backendPreference: exportFormat === "mp4" ? exportBackendPreference : undefined,
 			pipelineModel: exportFormat === "mp4" ? exportPipelineModel : undefined,
@@ -4898,6 +4907,7 @@ export default function VideoEditor() {
 	const handleCancelExport = useCallback(() => {
 		if (exporterRef.current) {
 			exporterRef.current.cancel();
+			exporterRef.current = null;
 			toast.info("Export canceled");
 			clearPendingExportSave();
 			setShowExportDropdown(false);
@@ -5628,6 +5638,8 @@ export default function VideoEditor() {
 									onExportFormatChange={setExportFormat}
 									exportEncodingMode={exportEncodingMode}
 									onExportEncodingModeChange={setExportEncodingMode}
+									exportMemoryUsage={exportMemoryUsage}
+									onExportMemoryUsageChange={setExportMemoryUsage}
 									mp4FrameRate={mp4FrameRate}
 									onMp4FrameRateChange={setMp4FrameRate}
 									exportPipelineModel={exportPipelineModel}

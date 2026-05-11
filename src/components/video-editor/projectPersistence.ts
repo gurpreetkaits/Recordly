@@ -2,6 +2,7 @@ import type {
 	ExportBackendPreference,
 	ExportEncodingMode,
 	ExportFormat,
+	ExportMemoryUsage,
 	ExportMp4FrameRate,
 	ExportPipelineModel,
 	ExportQuality,
@@ -131,6 +132,7 @@ export interface ProjectEditorState {
 	sourceAudioTrackSettingsByClip?: Record<string, SourceAudioTrackSettings>;
 	defaultSourceAudioTrackSettings?: SourceAudioTrackSettings;
 	exportEncodingMode: ExportEncodingMode;
+	exportMemoryUsage: ExportMemoryUsage;
 	exportBackendPreference: ExportBackendPreference;
 	exportPipelineModel: ExportPipelineModel;
 	exportQuality: ExportQuality;
@@ -162,6 +164,14 @@ export function normalizeExportEncodingMode(value: unknown): ExportEncodingMode 
 	}
 
 	return "balanced";
+}
+
+export function normalizeExportMemoryUsage(value: unknown): ExportMemoryUsage {
+	if (value === "low" || value === "balanced" || value === "high") {
+		return value;
+	}
+
+	return "low";
 }
 
 export function normalizeExportBackendPreference(value: unknown): ExportBackendPreference {
@@ -1008,6 +1018,7 @@ export function normalizeProjectEditor(editor: Partial<ProjectEditorState>): Pro
 				? (editor.aspectRatio as AspectRatio)
 				: "16:9",
 		exportEncodingMode: normalizeExportEncodingMode(editor.exportEncodingMode),
+		exportMemoryUsage: normalizeExportMemoryUsage(editor.exportMemoryUsage),
 		exportBackendPreference: normalizeExportBackendPreference(editor.exportBackendPreference),
 		exportPipelineModel: normalizeExportPipelineModel(editor.exportPipelineModel),
 		exportQuality:

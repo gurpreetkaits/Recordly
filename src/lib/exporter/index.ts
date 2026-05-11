@@ -19,6 +19,7 @@ export type {
 	ExportEncodeBackend,
 	ExportEncodingMode,
 	ExportFormat,
+	ExportMemoryUsage,
 	ExportMetrics,
 	ExportMp4FrameRate,
 	ExportPipelineModel,

@@ -432,6 +432,7 @@ export class ModernVideoExporter {
 				height: this.config.height,
 				frameRate: this.config.frameRate,
 				encodingMode: this.config.encodingMode,
+				memoryUsage: this.config.memoryUsage,
 			});
 			this.maxNativeWriteInFlight = useNativeEncoder
 				? Math.max(
@@ -541,6 +542,7 @@ export class ModernVideoExporter {
 						height: this.config.height,
 						frameRate: this.config.frameRate,
 						encodingMode: this.config.encodingMode,
+						memoryUsage: this.config.memoryUsage,
 					});
 					this.maxNativeWriteInFlight = 1;
 					await this.initializeEncoder();
@@ -3427,6 +3429,8 @@ export class ModernVideoExporter {
 		if (nativeStaticLayoutSessionId && typeof window !== "undefined") {
 			void window.electronAPI?.nativeStaticLayoutExportCancel?.(nativeStaticLayoutSessionId);
 		}
+
+		this.cleanup();
 	}
 
 	private cleanup(): void {

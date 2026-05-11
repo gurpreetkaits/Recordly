@@ -12,6 +12,7 @@ export interface ExportConfig {
 	maxDecodeQueue?: number;
 	maxPendingFrames?: number;
 	maxInFlightNativeWrites?: number;
+	memoryUsage?: ExportMemoryUsage;
 	sourceAudioFallbackStartDelayMsByPath?: Record<string, number>;
 }
 
@@ -171,6 +172,8 @@ export interface VideoFrameData {
 
 export type ExportEncodingMode = "fast" | "balanced" | "quality";
 
+export type ExportMemoryUsage = "low" | "balanced" | "high";
+
 export type ExportQuality = "medium" | "good" | "high" | "source";
 
 export type ExportMp4FrameRate = 24 | 30 | 60;
@@ -198,6 +201,7 @@ export interface ExportSettings {
 	mp4FrameRate?: ExportMp4FrameRate;
 	backendPreference?: ExportBackendPreference;
 	pipelineModel?: ExportPipelineModel;
+	memoryUsage?: ExportMemoryUsage;
 	// GIF settings
 	gifConfig?: GifExportConfig;
 }

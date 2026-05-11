@@ -6,6 +6,7 @@ import { useScopedT } from "@/contexts/I18nContext";
 import type {
 	ExportEncodingMode,
 	ExportFormat,
+	ExportMemoryUsage,
 	ExportMp4FrameRate,
 	ExportPipelineModel,
 	ExportQuality,
@@ -22,6 +23,8 @@ interface ExportSettingsMenuProps {
 	onExportQualityChange?: (quality: ExportQuality) => void;
 	exportEncodingMode: ExportEncodingMode;
 	onExportEncodingModeChange?: (encodingMode: ExportEncodingMode) => void;
+	exportMemoryUsage: ExportMemoryUsage;
+	onExportMemoryUsageChange?: (memoryUsage: ExportMemoryUsage) => void;
 	mp4FrameRate: ExportMp4FrameRate;
 	onMp4FrameRateChange?: (frameRate: ExportMp4FrameRate) => void;
 	exportPipelineModel?: ExportPipelineModel;
@@ -45,6 +48,8 @@ export function ExportSettingsMenu({
 	onExportQualityChange,
 	exportEncodingMode,
 	onExportEncodingModeChange,
+	exportMemoryUsage,
+	onExportMemoryUsageChange,
 	mp4FrameRate,
 	onMp4FrameRateChange,
 	exportPipelineModel = "modern",
@@ -204,6 +209,59 @@ export function ExportSettingsMenu({
 									{isActive ? (
 										<motion.span
 											layoutId="header-export-encoding-pill"
+										className="absolute inset-0 rounded-lg bg-neutral-800 dark:bg-white"
+											transition={{
+												type: "spring",
+												stiffness: 420,
+												damping: 34,
+											}}
+										/>
+									) : null}
+									<span
+										className={cn(
+											"relative z-10",
+											isActive
+												? "text-white dark:text-black"
+												: "text-muted-foreground hover:text-foreground",
+										)}
+									>
+										{option.label}
+									</span>
+								</button>
+							);
+						})}
+					</div>
+					<div className="mb-1 flex items-center justify-between px-1">
+						<span className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">
+							{tSettings("export.memoryTitle", "Memory")}
+						</span>
+					</div>
+					<div className="mb-3 grid min-h-10 w-full grid-cols-3 rounded-xl border border-foreground/5 bg-foreground/5 p-0.5">
+						{(
+							[
+								{ value: "low", label: tSettings("export.memory.low", "Low") },
+								{
+									value: "balanced",
+									label: tSettings("export.memory.balanced", "Balanced"),
+								},
+								{
+									value: "high",
+									label: tSettings("export.memory.high", "High"),
+								},
+							] as const
+						).map((option) => {
+							const isActive = exportMemoryUsage === option.value;
+							return (
+								<button
+									key={option.value}
+									type="button"
+									onClick={() => onExportMemoryUsageChange?.(option.value)}
+									aria-pressed={isActive}
+									className="relative rounded-lg px-1 py-1 text-[11px] font-medium transition-colors"
+								>
+									{isActive ? (
+										<motion.span
+											layoutId="header-export-memory-pill"
 										className="absolute inset-0 rounded-lg bg-neutral-800 dark:bg-white"
 											transition={{
 												type: "spring",

@@ -46,6 +46,7 @@ type PersistedEditorControls = Pick<
 	| "webcam"
 	| "aspectRatio"
 	| "exportEncodingMode"
+	| "exportMemoryUsage"
 	| "exportBackendPreference"
 	| "exportPipelineModel"
 	| "exportQuality"
@@ -127,6 +128,7 @@ export const DEFAULT_EDITOR_PREFERENCES: EditorPreferences = {
 	webcam: DEFAULT_EDITOR_CONTROLS.webcam,
 	aspectRatio: DEFAULT_EDITOR_CONTROLS.aspectRatio,
 	exportEncodingMode: DEFAULT_EDITOR_CONTROLS.exportEncodingMode,
+	exportMemoryUsage: DEFAULT_EDITOR_CONTROLS.exportMemoryUsage,
 	exportBackendPreference: DEFAULT_EDITOR_CONTROLS.exportBackendPreference,
 	exportPipelineModel: DEFAULT_EDITOR_CONTROLS.exportPipelineModel,
 	exportQuality: DEFAULT_EDITOR_CONTROLS.exportQuality,
@@ -315,6 +317,7 @@ function normalizeEditorControls(
 		webcam: raw.webcam ?? fallback.webcam,
 		aspectRatio: raw.aspectRatio ?? fallback.aspectRatio,
 		exportEncodingMode: raw.exportEncodingMode ?? fallback.exportEncodingMode,
+		exportMemoryUsage: raw.exportMemoryUsage ?? fallback.exportMemoryUsage,
 		exportBackendPreference:
 			raw.exportBackendPreference === undefined
 				? fallback.exportBackendPreference
@@ -375,6 +378,7 @@ function normalizeEditorControls(
 		webcam: normalized.webcam,
 		aspectRatio: normalized.aspectRatio,
 		exportEncodingMode: normalized.exportEncodingMode,
+		exportMemoryUsage: normalized.exportMemoryUsage,
 		exportBackendPreference: normalized.exportBackendPreference,
 		exportPipelineModel: normalized.exportPipelineModel,
 		exportQuality: normalized.exportQuality,
