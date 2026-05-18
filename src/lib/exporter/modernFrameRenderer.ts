@@ -398,6 +398,7 @@ export class FrameRenderer {
 	private cameraContainer: Container | null = null;
 	private videoEffectsContainer: Container | null = null;
 	private videoContainer: Container | null = null;
+	private frameContainer: Container | null = null;
 	private cursorContainer: Container | null = null;
 	private overlayContainer: Container | null = null;
 	private annotationContainer: Container | null = null;
@@ -447,6 +448,20 @@ export class FrameRenderer {
 	private captionSprite: Sprite | null = null;
 	private captionTextureSource: MutableVideoTextureSource | null = null;
 	private captionRenderKey: string | null = null;
+	private frameSprite: Sprite | null = null;
+	private frameImage: HTMLImageElement | null = null;
+	private frameDraw:
+		| ((ctx: CanvasRenderingContext2D, width: number, height: number) => void)
+		| null = null;
+	private frameInsets: {
+		top: number;
+		right: number;
+		bottom: number;
+		left: number;
+	} | null = null;
+	private frameRasterCanvas: HTMLCanvasElement | null = null;
+	private frameRasterWidth = 0;
+	private frameRasterHeight = 0;
 	private exportCompositeCanvas: ExportCompositeCanvasState | null = null;
 	private temporalCompositeCanvas: ExportCompositeCanvasState | null = null;
 	private outputCanvasOverride: HTMLCanvasElement | null = null;
@@ -462,7 +477,6 @@ export class FrameRenderer {
 	private currentVideoTime = 0;
 	private cursorOverlay: PixiCursorOverlay | null = null;
 	private lastSyncedWebcamTime: number | null = null;
-	private lastWebcamCacheRefreshTime: number | null = null;
 	private webcamRenderMode: "hidden" | "live" | "cached" = "hidden";
 	private webcamLayoutCache: WebcamLayoutCache | null = null;
 	private videoTextureUsesStartupStaging = false;
@@ -525,7 +539,9 @@ export class FrameRenderer {
 		canvas.height = this.config.height;
 
 		try {
-			const exportCanvas = canvas as HTMLCanvasElement & { colorSpace?: string };
+			const exportCanvas = canvas as HTMLCanvasElement & {
+				colorSpace?: string;
+			};
 			if ("colorSpace" in exportCanvas) {
 				exportCanvas.colorSpace = "srgb";
 			}
@@ -541,6 +557,7 @@ export class FrameRenderer {
 		this.cameraContainer = new Container();
 		this.videoEffectsContainer = new Container();
 		this.videoContainer = new Container();
+		this.frameContainer = new Container();
 		this.cursorContainer = new Container();
 		this.overlayContainer = new Container();
 		this.annotationContainer = new Container();
@@ -558,6 +575,7 @@ export class FrameRenderer {
 		);
 
 		this.cameraContainer.addChild(this.videoEffectsContainer);
+		this.cameraContainer.addChild(this.frameContainer);
 		this.cameraContainer.addChild(this.cursorContainer);
 		this.videoEffectsContainer.addChild(this.videoContainer);
 		this.videoEffectsContainer.filterArea = new Rectangle(
@@ -608,6 +626,7 @@ export class FrameRenderer {
 		}
 
 		await this.setupBackground();
+		await this.setupFrame();
 		await this.setupWebcamSource();
 
 		this.annotationScaleFactor = this.calculateAnnotationScaleFactor();
@@ -616,7 +635,10 @@ export class FrameRenderer {
 		this.setupCaptionResources();
 
 		if (this.shouldUseZoomMotionBlur()) {
-			this.zoomBlurFilter = new ZoomBlurFilter({ strength: 0, maxKernelSize: 13 });
+			this.zoomBlurFilter = new ZoomBlurFilter({
+				strength: 0,
+				maxKernelSize: 13,
+			});
 			this.motionBlurFilter = new MotionBlurFilter([0, 0], 5, 0);
 		}
 
@@ -720,7 +742,11 @@ export class FrameRenderer {
 
 	private createShadowLayers(
 		parent: Container,
-		configs: ReadonlyArray<{ offsetScale: number; alphaScale: number; blurScale: number }>,
+		configs: ReadonlyArray<{
+			offsetScale: number;
+			alphaScale: number;
+			blurScale: number;
+		}>,
 	): ShadowLayer[] {
 		return configs.map((config) => {
 			const container = new Container();
@@ -1038,6 +1064,13 @@ export class FrameRenderer {
 		fallbackWidth: number,
 		fallbackHeight: number,
 	): CanvasImageSource | VideoFrame {
+		// Keep webcam uploads on the older canvas-staged path. The newer
+		// retained-VideoFrame upload path is fine for the main scene/background,
+		// but it has produced unstable webcam overlays in Lightning exports.
+		if (kind === "webcam") {
+			return this.stageVideoFrameOnCanvas(frame, kind, fallbackWidth, fallbackHeight);
+		}
+
 		if (this.rendererBackend === "webgpu") {
 			return this.resolveRetainedVideoFrameSource(frame, kind, fallbackWidth, fallbackHeight);
 		}
@@ -1992,8 +2025,12 @@ export class FrameRenderer {
 						}
 					};
 
-					video.addEventListener("seeked", waitForPresentedFrame, { once: true });
-					video.addEventListener("loadeddata", handleMediaReady, { once: true });
+					video.addEventListener("seeked", waitForPresentedFrame, {
+						once: true,
+					});
+					video.addEventListener("loadeddata", handleMediaReady, {
+						once: true,
+					});
 					video.addEventListener("canplay", handleMediaReady, { once: true });
 					video.addEventListener("error", finish, { once: true });
 
@@ -2072,6 +2109,41 @@ export class FrameRenderer {
 			? `file://${encodeURI(wallpaper)}`
 			: wallpaper;
 		return getRenderableAssetUrl(wallpaperAsset);
+	}
+
+	private async setupFrame(): Promise<void> {
+		const frameId = this.config.frame;
+		if (!frameId) {
+			return;
+		}
+
+		const frames = extensionHost.getFrames();
+		const frame = frames.find((candidate) => candidate.id === frameId);
+		if (!frame) {
+			console.warn(`[ModernFrameRenderer] Device frame "${frameId}" not found`);
+			return;
+		}
+
+		this.frameInsets = frame.screenInsets;
+
+		if (frame.draw) {
+			this.frameDraw = frame.draw;
+			return;
+		}
+
+		const image = new Image();
+		image.crossOrigin = "anonymous";
+		await new Promise<void>((resolve, reject) => {
+			image.onload = () => resolve();
+			image.onerror = () =>
+				reject(
+					new Error(
+						`[ModernFrameRenderer] Failed to load device frame image: ${frameId}`,
+					),
+				);
+			image.src = frame.filePath;
+		});
+		this.frameImage = image;
 	}
 
 	private async fallbackBackgroundForwardFrameSourceToMediaElement(): Promise<boolean> {
@@ -2294,7 +2366,6 @@ export class FrameRenderer {
 			this.webcamFrameCacheCanvas = null;
 			this.webcamFrameCacheCtx = null;
 			this.lastSyncedWebcamTime = null;
-			this.lastWebcamCacheRefreshTime = null;
 			this.webcamLayoutCache = null;
 			this.webcamRenderMode = "hidden";
 			return;
@@ -2307,7 +2378,6 @@ export class FrameRenderer {
 		this.clearWebcamMediaElement();
 		this.webcamFrameCacheCanvas = null;
 		this.webcamFrameCacheCtx = null;
-		this.lastWebcamCacheRefreshTime = null;
 		this.webcamLayoutCache = null;
 		this.webcamRenderMode = "hidden";
 
@@ -2318,7 +2388,6 @@ export class FrameRenderer {
 			this.webcamVideoElement = null;
 			this.webcamSeekPromise = null;
 			this.lastSyncedWebcamTime = null;
-			this.lastWebcamCacheRefreshTime = null;
 			return;
 		} catch (error) {
 			console.warn(
@@ -2379,31 +2448,6 @@ export class FrameRenderer {
 		this.webcamRenderMode = nextMode;
 	}
 
-	private shouldRefreshWebcamFrameCache(width: number, height: number): boolean {
-		const cropRegion = this.config.webcam?.cropRegion;
-		const sourceRect = getWebcamCropSourceRect(cropRegion, width, height);
-		const targetWidth = Math.max(1, Math.ceil(sourceRect.sw));
-		const targetHeight = Math.max(1, Math.ceil(sourceRect.sh));
-
-		if (
-			!this.webcamFrameCacheCanvas ||
-			this.webcamFrameCacheCanvas.width !== targetWidth ||
-			this.webcamFrameCacheCanvas.height !== targetHeight
-		) {
-			return true;
-		}
-
-		if (!isWebcamCropRegionDefault(cropRegion)) {
-			return true;
-		}
-
-		if (this.lastWebcamCacheRefreshTime === null) {
-			return true;
-		}
-
-		return Math.abs(this.currentVideoTime - this.lastWebcamCacheRefreshTime) >= 0.25;
-	}
-
 	private ensureWebcamFrameCache(width: number, height: number): boolean {
 		const targetWidth = Math.max(1, Math.ceil(width));
 		const targetHeight = Math.max(1, Math.ceil(height));
@@ -2458,7 +2502,6 @@ export class FrameRenderer {
 			this.webcamFrameCacheCanvas.width,
 			this.webcamFrameCacheCanvas.height,
 		);
-		this.lastWebcamCacheRefreshTime = this.currentVideoTime;
 		return true;
 	}
 
@@ -2486,16 +2529,25 @@ export class FrameRenderer {
 		canUseLiveSource: boolean,
 	): WebcamRenderSource | null {
 		if (canUseLiveSource && liveSource && liveSourceWidth > 0 && liveSourceHeight > 0) {
-			if (this.shouldRefreshWebcamFrameCache(liveSourceWidth, liveSourceHeight)) {
-				this.refreshWebcamFrameCache(liveSource, liveSourceWidth, liveSourceHeight);
-			}
-			if (!isWebcamCropRegionDefault(this.config.webcam?.cropRegion)) {
+			const usesDefaultCropRegion = isWebcamCropRegionDefault(this.config.webcam?.cropRegion);
+			const needsCacheBackedSource =
+				!usesDefaultCropRegion ||
+				(typeof HTMLVideoElement !== "undefined" &&
+					liveSource instanceof HTMLVideoElement);
+
+			if (needsCacheBackedSource) {
+				this.refreshWebcamFrameCache(
+					liveSource,
+					liveSourceWidth,
+					liveSourceHeight,
+				);
 				const cachedSource = this.getCachedWebcamRenderSource();
 				if (cachedSource) {
 					this.setWebcamRenderMode("live");
 					return cachedSource;
 				}
 			}
+
 			this.setWebcamRenderMode("live");
 			return {
 				source: liveSource,
@@ -2593,14 +2645,18 @@ export class FrameRenderer {
 		this.webcamLayoutCache = { ...nextLayout };
 	}
 
-	private async syncWebcamFrame(targetTime: number): Promise<void> {
-		const webcamTargetTime = getWebcamMediaTargetTimeSeconds({
+	private getExpectedWebcamTargetTimeSeconds(targetTime: number): number {
+		return getWebcamMediaTargetTimeSeconds({
 			currentTime: targetTime,
 			webcamDuration: Number.isFinite(this.webcamVideoElement?.duration)
 				? this.webcamVideoElement?.duration
 				: null,
 			timeOffsetMs: this.config.webcam?.timeOffsetMs,
 		});
+	}
+
+	private async syncWebcamFrame(targetTime: number): Promise<void> {
+		const webcamTargetTime = this.getExpectedWebcamTargetTimeSeconds(targetTime);
 
 		if (this.webcamForwardFrameSource) {
 			const clampedTime = clampMediaTimeToDuration(webcamTargetTime, null);
@@ -2736,8 +2792,12 @@ export class FrameRenderer {
 				}
 			};
 
-			webcamVideo.addEventListener("seeked", waitForPresentedFrame, { once: true });
-			webcamVideo.addEventListener("loadeddata", handleMediaReady, { once: true });
+			webcamVideo.addEventListener("seeked", waitForPresentedFrame, {
+				once: true,
+			});
+			webcamVideo.addEventListener("loadeddata", handleMediaReady, {
+				once: true,
+			});
 			webcamVideo.addEventListener("canplay", handleMediaReady, { once: true });
 			webcamVideo.addEventListener("error", finish, { once: true });
 
@@ -2768,7 +2828,7 @@ export class FrameRenderer {
 		}
 	}
 
-	private updateWebcamOverlay(): void {
+	private updateWebcamOverlay(referenceTimeSeconds = this.currentVideoTime): void {
 		const webcam = this.config.webcam;
 		if (!webcam?.enabled || !this.webcamRootContainer || !this.webcamMaskGraphics) {
 			if (this.webcamRootContainer) {
@@ -2785,10 +2845,16 @@ export class FrameRenderer {
 			: { width: 0, height: 0 };
 		const activeWebcamVideoElement =
 			webcamSource === this.webcamVideoElement ? this.webcamVideoElement : null;
+		const expectedWebcamTargetTime =
+			this.getExpectedWebcamTargetTimeSeconds(referenceTimeSeconds);
+		const measuredWebcamTime =
+			activeWebcamVideoElement && Number.isFinite(activeWebcamVideoElement.currentTime)
+				? activeWebcamVideoElement.currentTime
+				: this.lastSyncedWebcamTime;
 		const webcamTimeDrift =
-			this.lastSyncedWebcamTime === null
+			measuredWebcamTime === null
 				? 0
-				: Math.abs(this.lastSyncedWebcamTime - this.currentVideoTime);
+				: Math.abs(measuredWebcamTime - expectedWebcamTargetTime);
 		const canUseLiveSource =
 			!!webcamSource &&
 			liveSourceDimensions.width > 0 &&
@@ -2867,15 +2933,20 @@ export class FrameRenderer {
 		layoutCache: LayoutCache,
 		useVelocityMotionBlur: boolean,
 		includeOverlayLayers = true,
+		webcamTimeSecondsOverride?: number,
 	): Promise<RenderSnapshot> {
 		if (!this.app || !this.cameraContainer || !this.videoMaskGraphics) {
 			throw new Error("Renderer not initialized");
 		}
 
 		this.currentVideoTime = timestamp / 1_000_000;
+		const webcamRenderTimeSeconds = Math.max(
+			0,
+			webcamTimeSecondsOverride ?? this.currentVideoTime,
+		);
 
 		if (this.webcamForwardFrameSource || this.webcamVideoElement) {
-			await this.syncWebcamFrame(Math.max(0, this.currentVideoTime));
+			await this.syncWebcamFrame(webcamRenderTimeSeconds);
 		}
 
 		if (this.backgroundForwardFrameSource || this.backgroundVideoElement) {
@@ -2923,7 +2994,7 @@ export class FrameRenderer {
 			this.updateAnnotationLayer(timeMs);
 			this.updateCaptionLayer(timeMs);
 		}
-		this.updateWebcamOverlay();
+		this.updateWebcamOverlay(webcamRenderTimeSeconds);
 
 		const annotationContainerVisible = this.annotationContainer?.visible ?? true;
 		const captionContainerVisible = this.captionContainer?.visible ?? true;
@@ -2990,6 +3061,7 @@ export class FrameRenderer {
 		}
 
 		const samplePlan = buildTemporalSamplePlanUs(frameDurationUs, blurConfig);
+		const webcamReferenceTimeSeconds = Math.max(0, timestamp / 1_000_000);
 
 		compositeState.context.clearRect(
 			0,
@@ -3015,6 +3087,7 @@ export class FrameRenderer {
 				layoutCache,
 				false,
 				false,
+				webcamReferenceTimeSeconds,
 			);
 			lastSnapshot = snapshot;
 			if (Math.abs(sampleOffsetUs) < 0.0001) {
@@ -3437,6 +3510,7 @@ export class FrameRenderer {
 			width,
 			height,
 			padding,
+			frameInsets: this.frameInsets,
 			cropRegion,
 			videoWidth,
 			videoHeight,
@@ -3484,6 +3558,85 @@ export class FrameRenderer {
 				sourceCrop: cropRegion,
 			},
 		};
+
+		this.updateFrameLayout();
+	}
+
+	private updateFrameLayout(): void {
+		if (!this.frameContainer || !this.layoutCache) {
+			return;
+		}
+
+		if (!this.frameImage && !this.frameDraw) {
+			if (this.frameSprite) {
+				const texture = this.frameSprite.texture;
+				this.frameContainer.removeChild(this.frameSprite);
+				this.frameSprite.destroy();
+				texture.destroy(true);
+				this.frameSprite = null;
+			}
+			return;
+		}
+
+		const maskRect = this.layoutCache.maskRect;
+		const insets = this.frameInsets;
+		let frameX = maskRect.x;
+		let frameY = maskRect.y;
+		let frameWidth = maskRect.width;
+		let frameHeight = maskRect.height;
+
+		if (insets) {
+			const screenWidth = maskRect.width;
+			const screenHeight = maskRect.height;
+			frameWidth = screenWidth / (1 - insets.left - insets.right);
+			frameHeight = screenHeight / (1 - insets.top - insets.bottom);
+			frameX = maskRect.x - insets.left * frameWidth;
+			frameY = maskRect.y - insets.top * frameHeight;
+		}
+
+		if (this.frameDraw) {
+			const targetWidth = Math.max(1, Math.round(frameWidth));
+			const targetHeight = Math.max(1, Math.round(frameHeight));
+			if (
+				!this.frameRasterCanvas ||
+				this.frameRasterWidth !== targetWidth ||
+				this.frameRasterHeight !== targetHeight
+			) {
+				const canvas = document.createElement("canvas");
+				canvas.width = targetWidth;
+				canvas.height = targetHeight;
+				const context = configureHighQuality2DContext(canvas.getContext("2d"));
+				if (!context) {
+					return;
+				}
+				this.frameDraw(context, targetWidth, targetHeight);
+				this.frameRasterCanvas = canvas;
+				this.frameRasterWidth = targetWidth;
+				this.frameRasterHeight = targetHeight;
+
+				const texture = Texture.from(canvas);
+				if (!this.frameSprite) {
+					this.frameSprite = new Sprite(texture);
+					this.frameContainer.addChild(this.frameSprite);
+				} else {
+					const previousTexture = this.frameSprite.texture;
+					this.frameSprite.texture = texture;
+					previousTexture.destroy(true);
+				}
+			}
+		} else if (this.frameImage && !this.frameSprite) {
+			const texture = Texture.from(this.frameImage);
+			this.frameSprite = new Sprite(texture);
+			this.frameContainer.addChild(this.frameSprite);
+		}
+
+		if (!this.frameSprite) {
+			return;
+		}
+
+		this.frameSprite.position.set(frameX, frameY);
+		this.frameSprite.width = frameWidth;
+		this.frameSprite.height = frameHeight;
 	}
 
 	private updateVideoShadowLayout(layout: {
@@ -3724,6 +3877,9 @@ export class FrameRenderer {
 		if (this.captionSprite?.texture) {
 			texturesToDestroy.add(this.captionSprite.texture);
 		}
+		if (this.frameSprite?.texture) {
+			texturesToDestroy.add(this.frameSprite.texture);
+		}
 		for (const layer of this.videoShadowLayers) {
 			if (layer.sprite?.texture) {
 				texturesToDestroy.add(layer.sprite.texture);
@@ -3772,6 +3928,7 @@ export class FrameRenderer {
 		this.cameraContainer = null;
 		this.videoEffectsContainer = null;
 		this.videoContainer = null;
+		this.frameContainer = null;
 		this.cursorContainer = null;
 		this.overlayContainer = null;
 		this.annotationContainer = null;
@@ -3845,13 +4002,19 @@ export class FrameRenderer {
 		this.captionSprite = null;
 		this.captionTextureSource = null;
 		this.captionRenderKey = null;
+		this.frameSprite = null;
+		this.frameImage = null;
+		this.frameDraw = null;
+		this.frameInsets = null;
+		this.frameRasterCanvas = null;
+		this.frameRasterWidth = 0;
+		this.frameRasterHeight = 0;
 		this.exportCompositeCanvas = null;
 		this.temporalCompositeCanvas = null;
 		this.outputCanvasOverride = null;
 
 		this.annotationScaleFactor = 1;
 		this.lastSyncedWebcamTime = null;
-		this.lastWebcamCacheRefreshTime = null;
 		this.webcamRenderMode = "hidden";
 		this.webcamLayoutCache = null;
 		this.layoutCache = null;

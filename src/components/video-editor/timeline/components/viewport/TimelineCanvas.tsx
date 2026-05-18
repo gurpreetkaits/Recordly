@@ -68,6 +68,7 @@ interface TimelineCanvasProps {
 	showSourceAudioTrack?: boolean;
 	liveSpanPreviewById?: Record<string, { start: number; end: number }>;
 	liveHiddenItemIds?: string[];
+	isLoading?: boolean;
 }
 
 interface TimelineHoverParams {
@@ -169,6 +170,10 @@ function useTimelineHover({
 		setZoomRowHoverMs(null);
 	}, []);
 
+	const handleZoomRowMouseDown = useCallback((event: MouseEvent<HTMLDivElement>) => {
+		event.stopPropagation();
+	}, []);
+
 	const handleZoomRowClick = useCallback(
 		(event: MouseEvent<HTMLDivElement>) => {
 			event.stopPropagation();
@@ -212,6 +217,7 @@ function useTimelineHover({
 		handleZoomRowMouseEnter,
 		handleZoomRowMouseMove,
 		handleZoomRowMouseLeave,
+		handleZoomRowMouseDown,
 		handleZoomRowClick,
 	};
 }
@@ -243,7 +249,9 @@ interface TimelineCanvasRowsProps {
 	onZoomRowMouseEnter: MouseEventHandler<HTMLDivElement>;
 	onZoomRowMouseMove: MouseEventHandler<HTMLDivElement>;
 	onZoomRowMouseLeave: MouseEventHandler<HTMLDivElement>;
+	onZoomRowMouseDown: MouseEventHandler<HTMLDivElement>;
 	onZoomRowClick: MouseEventHandler<HTMLDivElement>;
+	isLoading?: boolean;
 }
 
 interface AudioItemWithWaveformProps {
@@ -261,7 +269,7 @@ function AudioItemWithWaveform({
 	isSelected,
 	onSelectAudio,
 }: AudioItemWithWaveformProps) {
-	const peaks = useTimelineAudioPeaks(item.audioPath ?? null);
+	const { peaks } = useTimelineAudioPeaks(item.audioPath ?? null);
 	const normalizedWaveformSpan = useMemo(() => {
 		const duration = Math.max(0, waveformSpan.end - waveformSpan.start);
 		return { start: 0, end: duration };
@@ -276,7 +284,7 @@ function AudioItemWithWaveform({
 				variant="audio"
 				waveformPeaks={peaks}
 				waveformSegmentSpan={normalizedWaveformSpan}
-				waveformGain={Math.max(0, Math.min(2, item.audioGain ?? 1))}
+				waveformGain={Math.max(0, Math.min(1, item.audioGain ?? 1))}
 				waveformNormalize={Boolean(item.audioNormalize)}
 			>
 			{item.label}
@@ -309,7 +317,9 @@ const TimelineCanvasRows = memo(function TimelineCanvasRows({
 	onZoomRowMouseEnter,
 	onZoomRowMouseMove,
 	onZoomRowMouseLeave,
+	onZoomRowMouseDown,
 	onZoomRowClick,
+	isLoading = false,
 }: TimelineCanvasRowsProps) {
 	const hiddenIds = useMemo(() => new Set(liveHiddenItemIds ?? []), [liveHiddenItemIds]);
 	const { clipItems, zoomItems, annotationRows, audioRows } = useMemo(() => {
@@ -376,6 +386,8 @@ const TimelineCanvasRows = memo(function TimelineCanvasRows({
 						isSelected={selectAllBlocksActive || item.id === selectedClipId}
 						onSelectId={onSelectClip}
 						variant="clip"
+						isLoading={isLoading}
+						loadingLabel="Analyzing..."
 					>
 						{item.label}
 					</Item>
@@ -400,7 +412,7 @@ const TimelineCanvasRows = memo(function TimelineCanvasRows({
 									variant="audio"
 									waveformPeaks={track.peaks}
 									waveformSegmentSpan={item.sourceSpan ?? item.span}
-									waveformGain={Math.max(0, Math.min(2, settings.volume))}
+									waveformGain={Math.max(0, Math.min(1, settings.volume))}
 									waveformNormalize={Boolean(settings.normalize)}
 									muted={item.muted}
 								>
@@ -417,6 +429,7 @@ const TimelineCanvasRows = memo(function TimelineCanvasRows({
 				onMouseEnter={onZoomRowMouseEnter}
 				onMouseMove={onZoomRowMouseMove}
 				onMouseLeave={onZoomRowMouseLeave}
+				onMouseDown={onZoomRowMouseDown}
 				onClick={onZoomRowClick}
 			>
 				{canShowGhostZoom && ghostStartMs !== null && (
@@ -522,6 +535,7 @@ export default function TimelineCanvas({
 	showSourceAudioTrack = false,
 	liveSpanPreviewById,
 	liveHiddenItemIds,
+	isLoading = false,
 }: TimelineCanvasProps) {
 	const { setTimelineRef, style, sidebarWidth, direction, range, valueToPixels, pixelsToValue } =
 		useTimelineContext();
@@ -693,6 +707,7 @@ export default function TimelineCanvas({
 		handleZoomRowMouseEnter,
 		handleZoomRowMouseMove,
 		handleZoomRowMouseLeave,
+		handleZoomRowMouseDown,
 		handleZoomRowClick,
 	} = useTimelineHover({
 		direction,
@@ -726,6 +741,7 @@ export default function TimelineCanvas({
 				onSeek={onSeek}
 				timelineRef={localTimelineRef}
 				keyframes={keyframes}
+				isLoading={isLoading}
 			/>
 			{canShowGhostPlayhead && (
 				<div
@@ -764,7 +780,9 @@ export default function TimelineCanvas({
 					onZoomRowMouseEnter={handleZoomRowMouseEnter}
 					onZoomRowMouseMove={handleZoomRowMouseMove}
 					onZoomRowMouseLeave={handleZoomRowMouseLeave}
+					onZoomRowMouseDown={handleZoomRowMouseDown}
 					onZoomRowClick={handleZoomRowClick}
+					isLoading={isLoading}
 				/>
 			</div>
 		</div>

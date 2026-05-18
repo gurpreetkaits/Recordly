@@ -3,8 +3,10 @@ import {
 	normalizeExportMp4FrameRate,
 	normalizeExportPipelineModel,
 	normalizeProjectEditor,
+	stripPersistedDevMotionBlurSettings,
 	type ProjectEditorState,
 } from "./projectPersistence";
+import { loadAppSetting, saveAppSetting } from "../../lib/appSettings";
 
 type PersistedEditorControls = Pick<
 	ProjectEditorState,
@@ -269,72 +271,75 @@ function normalizeEditorControls(
 	raw: Partial<EditorPreferences>,
 	fallback: EditorPreferences,
 ): PersistedEditorControls {
+	const sanitizedRaw = stripPersistedDevMotionBlurSettings(raw);
 	const candidate: PartialEditorControls = {
-		wallpaper: raw.wallpaper ?? fallback.wallpaper,
-		shadowIntensity: raw.shadowIntensity ?? fallback.shadowIntensity,
-		backgroundBlur: raw.backgroundBlur ?? fallback.backgroundBlur,
-		zoomMotionBlur: raw.zoomMotionBlur ?? fallback.zoomMotionBlur,
-		zoomMotionBlurTuning: raw.zoomMotionBlurTuning ?? fallback.zoomMotionBlurTuning,
-		zoomTemporalMotionBlur: raw.zoomTemporalMotionBlur ?? fallback.zoomTemporalMotionBlur,
-		zoomMotionBlurSampleCount:
-			raw.zoomMotionBlurSampleCount ?? fallback.zoomMotionBlurSampleCount,
-		zoomMotionBlurShutterFraction:
-			raw.zoomMotionBlurShutterFraction ?? fallback.zoomMotionBlurShutterFraction,
-		connectZooms: raw.connectZooms ?? fallback.connectZooms,
-		zoomInDurationMs: raw.zoomInDurationMs ?? fallback.zoomInDurationMs,
-		zoomInOverlapMs: raw.zoomInOverlapMs ?? fallback.zoomInOverlapMs,
-		zoomOutDurationMs: raw.zoomOutDurationMs ?? fallback.zoomOutDurationMs,
-		connectedZoomGapMs: raw.connectedZoomGapMs ?? fallback.connectedZoomGapMs,
-		connectedZoomDurationMs: raw.connectedZoomDurationMs ?? fallback.connectedZoomDurationMs,
-		zoomInEasing: raw.zoomInEasing ?? fallback.zoomInEasing,
-		zoomOutEasing: raw.zoomOutEasing ?? fallback.zoomOutEasing,
-		connectedZoomEasing: raw.connectedZoomEasing ?? fallback.connectedZoomEasing,
-		showCursor: raw.showCursor ?? fallback.showCursor,
-		loopCursor: raw.loopCursor ?? fallback.loopCursor,
-		cursorStyle: raw.cursorStyle ?? fallback.cursorStyle,
-		cursorSize: raw.cursorSize ?? fallback.cursorSize,
-		cursorSmoothing: raw.cursorSmoothing ?? fallback.cursorSmoothing,
+		wallpaper: sanitizedRaw.wallpaper ?? fallback.wallpaper,
+		shadowIntensity: sanitizedRaw.shadowIntensity ?? fallback.shadowIntensity,
+		backgroundBlur: sanitizedRaw.backgroundBlur ?? fallback.backgroundBlur,
+		zoomMotionBlur: sanitizedRaw.zoomMotionBlur ?? fallback.zoomMotionBlur,
+		connectZooms: sanitizedRaw.connectZooms ?? fallback.connectZooms,
+		zoomInDurationMs: sanitizedRaw.zoomInDurationMs ?? fallback.zoomInDurationMs,
+		zoomInOverlapMs: sanitizedRaw.zoomInOverlapMs ?? fallback.zoomInOverlapMs,
+		zoomOutDurationMs: sanitizedRaw.zoomOutDurationMs ?? fallback.zoomOutDurationMs,
+		connectedZoomGapMs:
+			sanitizedRaw.connectedZoomGapMs ?? fallback.connectedZoomGapMs,
+		connectedZoomDurationMs:
+			sanitizedRaw.connectedZoomDurationMs ?? fallback.connectedZoomDurationMs,
+		zoomInEasing: sanitizedRaw.zoomInEasing ?? fallback.zoomInEasing,
+		zoomOutEasing: sanitizedRaw.zoomOutEasing ?? fallback.zoomOutEasing,
+		connectedZoomEasing:
+			sanitizedRaw.connectedZoomEasing ?? fallback.connectedZoomEasing,
+		showCursor: sanitizedRaw.showCursor ?? fallback.showCursor,
+		loopCursor: sanitizedRaw.loopCursor ?? fallback.loopCursor,
+		cursorStyle: sanitizedRaw.cursorStyle ?? fallback.cursorStyle,
+		cursorSize: sanitizedRaw.cursorSize ?? fallback.cursorSize,
+		cursorSmoothing: sanitizedRaw.cursorSmoothing ?? fallback.cursorSmoothing,
 		cursorSpringStiffnessMultiplier:
-			raw.cursorSpringStiffnessMultiplier ?? fallback.cursorSpringStiffnessMultiplier,
+			sanitizedRaw.cursorSpringStiffnessMultiplier ??
+			fallback.cursorSpringStiffnessMultiplier,
 		cursorSpringDampingMultiplier:
-			raw.cursorSpringDampingMultiplier ?? fallback.cursorSpringDampingMultiplier,
+			sanitizedRaw.cursorSpringDampingMultiplier ??
+			fallback.cursorSpringDampingMultiplier,
 		cursorSpringMassMultiplier:
-			raw.cursorSpringMassMultiplier ?? fallback.cursorSpringMassMultiplier,
+			sanitizedRaw.cursorSpringMassMultiplier ?? fallback.cursorSpringMassMultiplier,
 		cameraSpringStiffnessMultiplier:
-			raw.cameraSpringStiffnessMultiplier ?? fallback.cameraSpringStiffnessMultiplier,
+			sanitizedRaw.cameraSpringStiffnessMultiplier ??
+			fallback.cameraSpringStiffnessMultiplier,
 		cameraSpringDampingMultiplier:
-			raw.cameraSpringDampingMultiplier ?? fallback.cameraSpringDampingMultiplier,
+			sanitizedRaw.cameraSpringDampingMultiplier ??
+			fallback.cameraSpringDampingMultiplier,
 		cameraSpringMassMultiplier:
-			raw.cameraSpringMassMultiplier ?? fallback.cameraSpringMassMultiplier,
-		cursorMotionBlur: raw.cursorMotionBlur ?? fallback.cursorMotionBlur,
-		cursorClickBounce: raw.cursorClickBounce ?? fallback.cursorClickBounce,
+			sanitizedRaw.cameraSpringMassMultiplier ?? fallback.cameraSpringMassMultiplier,
+		cursorMotionBlur: sanitizedRaw.cursorMotionBlur ?? fallback.cursorMotionBlur,
+		cursorClickBounce: sanitizedRaw.cursorClickBounce ?? fallback.cursorClickBounce,
 		cursorClickBounceDuration:
-			raw.cursorClickBounceDuration ?? fallback.cursorClickBounceDuration,
-		cursorSway: raw.cursorSway ?? fallback.cursorSway,
-		borderRadius: raw.borderRadius ?? fallback.borderRadius,
-		padding: raw.padding ?? fallback.padding,
-		frame: raw.frame !== undefined ? raw.frame : fallback.frame,
-		webcam: raw.webcam ?? fallback.webcam,
-		aspectRatio: raw.aspectRatio ?? fallback.aspectRatio,
-		exportEncodingMode: raw.exportEncodingMode ?? fallback.exportEncodingMode,
-		exportMemoryUsage: raw.exportMemoryUsage ?? fallback.exportMemoryUsage,
+			sanitizedRaw.cursorClickBounceDuration ?? fallback.cursorClickBounceDuration,
+		cursorSway: sanitizedRaw.cursorSway ?? fallback.cursorSway,
+		borderRadius: sanitizedRaw.borderRadius ?? fallback.borderRadius,
+		padding: sanitizedRaw.padding ?? fallback.padding,
+		frame: sanitizedRaw.frame !== undefined ? sanitizedRaw.frame : fallback.frame,
+		webcam: sanitizedRaw.webcam ?? fallback.webcam,
+		aspectRatio: sanitizedRaw.aspectRatio ?? fallback.aspectRatio,
+		exportEncodingMode:
+			sanitizedRaw.exportEncodingMode ?? fallback.exportEncodingMode,
+		exportMemoryUsage: sanitizedRaw.exportMemoryUsage ?? fallback.exportMemoryUsage,
 		exportBackendPreference:
-			raw.exportBackendPreference === undefined
+			sanitizedRaw.exportBackendPreference === undefined
 				? fallback.exportBackendPreference
-				: normalizeExportBackendPreference(raw.exportBackendPreference),
+				: normalizeExportBackendPreference(sanitizedRaw.exportBackendPreference),
 		exportPipelineModel:
-			raw.exportPipelineModel === undefined
+			sanitizedRaw.exportPipelineModel === undefined
 				? fallback.exportPipelineModel
-				: normalizeExportPipelineModel(raw.exportPipelineModel),
-		exportQuality: raw.exportQuality ?? fallback.exportQuality,
+				: normalizeExportPipelineModel(sanitizedRaw.exportPipelineModel),
+		exportQuality: sanitizedRaw.exportQuality ?? fallback.exportQuality,
 		mp4FrameRate:
-			raw.mp4FrameRate === undefined
+			sanitizedRaw.mp4FrameRate === undefined
 				? fallback.mp4FrameRate
-				: normalizeExportMp4FrameRate(raw.mp4FrameRate),
-		exportFormat: raw.exportFormat ?? fallback.exportFormat,
-		gifFrameRate: raw.gifFrameRate ?? fallback.gifFrameRate,
-		gifLoop: raw.gifLoop ?? fallback.gifLoop,
-		gifSizePreset: raw.gifSizePreset ?? fallback.gifSizePreset,
+				: normalizeExportMp4FrameRate(sanitizedRaw.mp4FrameRate),
+		exportFormat: sanitizedRaw.exportFormat ?? fallback.exportFormat,
+		gifFrameRate: sanitizedRaw.gifFrameRate ?? fallback.gifFrameRate,
+		gifLoop: sanitizedRaw.gifLoop ?? fallback.gifLoop,
+		gifSizePreset: sanitizedRaw.gifSizePreset ?? fallback.gifSizePreset,
 	};
 
 	const normalized = normalizeProjectEditor(candidate);
@@ -422,12 +427,13 @@ export function normalizeEditorPreferences(
 }
 
 export function loadEditorPreferences(): EditorPreferences {
-	if (typeof globalThis.localStorage === "undefined") {
-		return DEFAULT_EDITOR_PREFERENCES;
+	const persisted = loadAppSetting<unknown>(EDITOR_PREFERENCES_STORAGE_KEY);
+	if (persisted !== null) {
+		return normalizeEditorPreferences(persisted);
 	}
 
 	try {
-		const stored = globalThis.localStorage.getItem(EDITOR_PREFERENCES_STORAGE_KEY);
+		const stored = globalThis.localStorage?.getItem(EDITOR_PREFERENCES_STORAGE_KEY);
 		if (!stored) {
 			return DEFAULT_EDITOR_PREFERENCES;
 		}
@@ -439,26 +445,28 @@ export function loadEditorPreferences(): EditorPreferences {
 }
 
 export function saveEditorPreferences(preferences: Partial<EditorPreferences>): void {
-	if (typeof globalThis.localStorage === "undefined") {
-		return;
-	}
-
 	try {
 		const current = loadEditorPreferences();
 		const merged = normalizeEditorPreferences({ ...current, ...preferences }, current);
-		globalThis.localStorage.setItem(EDITOR_PREFERENCES_STORAGE_KEY, JSON.stringify(merged));
+		const persisted = stripPersistedDevMotionBlurSettings(merged);
+		saveAppSetting(EDITOR_PREFERENCES_STORAGE_KEY, persisted);
+		globalThis.localStorage?.setItem(
+			EDITOR_PREFERENCES_STORAGE_KEY,
+			JSON.stringify(persisted),
+		);
 	} catch {
 		// Ignore storage failures so editor controls still work.
 	}
 }
 
 export function loadEditorPresets(): EditorPreset[] {
-	if (typeof globalThis.localStorage === "undefined") {
-		return [];
+	const persisted = loadAppSetting<unknown>(EDITOR_PRESETS_STORAGE_KEY);
+	if (persisted !== null) {
+		return normalizeEditorPresets(persisted);
 	}
 
 	try {
-		const stored = globalThis.localStorage.getItem(EDITOR_PRESETS_STORAGE_KEY);
+		const stored = globalThis.localStorage?.getItem(EDITOR_PRESETS_STORAGE_KEY);
 		if (!stored) {
 			return [];
 		}
@@ -470,14 +478,11 @@ export function loadEditorPresets(): EditorPreset[] {
 }
 
 export function saveEditorPresets(presets: EditorPreset[]): boolean {
-	if (typeof globalThis.localStorage === "undefined") {
-		return false;
-	}
-
 	try {
 		const normalized = normalizeEditorPresets(presets);
-		globalThis.localStorage.setItem(EDITOR_PRESETS_STORAGE_KEY, JSON.stringify(normalized));
-		return true;
+		const persisted = saveAppSetting(EDITOR_PRESETS_STORAGE_KEY, normalized);
+		globalThis.localStorage?.setItem(EDITOR_PRESETS_STORAGE_KEY, JSON.stringify(normalized));
+		return persisted || typeof globalThis.localStorage !== "undefined";
 	} catch {
 		// Ignore storage failures so editor controls still work.
 		return false;

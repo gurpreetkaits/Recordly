@@ -642,6 +642,7 @@ const APP_LANGUAGE_LABELS: Record<AppLocale, string> = {
 	en: "English",
 	es: "Español",
 	fr: "Français",
+	it: "Italiano",
 	nl: "Nederlands",
 	ko: "한국어",
 	"pt-BR": "Português",
@@ -2733,7 +2734,7 @@ export function SettingsPanel({
 										.maxDirectionalBlurPx
 								}
 								min={0}
-								max={32}
+								max={96}
 								step={0.1}
 								onChange={(value) =>
 									onZoomMotionBlurTuningChange?.({
@@ -2777,7 +2778,7 @@ export function SettingsPanel({
 										.maxRadialBlurStrength
 								}
 								min={0}
-								max={0.5}
+								max={1.5}
 								step={0.005}
 								onChange={(value) =>
 									onZoomMotionBlurTuningChange?.({
@@ -3239,7 +3240,7 @@ export function SettingsPanel({
 											value={settings.volume}
 											defaultValue={1}
 											min={0}
-											max={2}
+											max={1}
 											step={0.01}
 											onChange={(v) => onSourceAudioTrackVolumeChange?.(track.id, v)}
 											formatValue={(v) => `${Math.round(v * 100)}%`}
